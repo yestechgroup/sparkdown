@@ -8,5 +8,6 @@ license.workspace = true
 sparkdown-core = { workspace = true }
 sparkdown-ontology = { workspace = true }
 sparkdown-render = { workspace = true }
+sparkdown-overlay = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }

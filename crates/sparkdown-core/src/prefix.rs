@@ -54,6 +54,7 @@ impl PrefixMap {
         self.insert("xsd", "http://www.w3.org/2001/XMLSchema#");
         self.insert("wikidata", "http://www.wikidata.org/entity/");
         self.insert("skos", "http://www.w3.org/2004/02/skos/core#");
+        self.insert("sd", "urn:sparkdown:vocab/");
     }
 
     /// Iterate over all prefix bindings.
