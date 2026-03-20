@@ -64,6 +64,16 @@ No breaking changes to `sparkdown-core`.
 
 An in-memory RDF graph where nodes are typed entities, edges are RDF properties, and every entity carries a positional anchor into the markdown source.
 
+### Concrete Type Aliases
+
+```rust
+/// Wraps oxrdf::BlankNode. Pattern: `_:e[0-9]+` or `_:doc`, `_:s[0-9]+`.
+type BlankNodeId = oxrdf::BlankNode;
+
+/// Wraps oxrdf::NamedNode (a validated IRI string).
+type Iri = oxrdf::NamedNode;
+```
+
 ### Core Types
 
 ```rust
@@ -81,9 +91,14 @@ struct SemanticEntity {
     status: AnchorStatus,
 }
 
+/// Byte-span anchor into the markdown source.
+/// `span.end == usize::MAX` represents an open-ended anchor (e.g., `[0..]`
+/// meaning "the entire document" or `[500..]` meaning "from byte 500 to EOF").
+/// Open-ended anchors are never shifted by sync — only their `start` is adjusted.
+/// Snippet verification is skipped for open-ended anchors.
 struct Anchor {
-    span: Range<usize>,          // byte range in markdown source
-    snippet: String,             // first ~40 chars for diagnostics
+    span: Range<usize>,          // byte range; end == usize::MAX means open-ended
+    snippet: String,             // first ~40 chars, used for staleness verification
 }
 
 enum AnchorStatus {
@@ -137,17 +152,23 @@ A bidirectional index connecting markdown AST node spans to semantic entity IDs:
 
 ```rust
 struct MappingIndex {
-    md_to_sem: BTreeMap<Range<usize>, Vec<BlankNodeId>>,
+    /// Interval tree for efficient overlap queries: "find all entities whose
+    /// span overlaps byte range X..Y." A BTreeMap<Range> cannot do this —
+    /// interval overlap queries require a dedicated interval tree structure
+    /// (e.g., the `lapper` crate or a custom augmented BST).
+    md_to_sem: IntervalTree<usize, Vec<BlankNodeId>>,
+
+    /// Reverse lookup: entity ID → markdown span.
     sem_to_md: HashMap<BlankNodeId, Range<usize>>,
 }
 ```
 
 The mapping index is **never persisted**. It is rebuilt whenever both the markdown AST and semantic graph are loaded. It answers:
 
-- "What semantics exist for this paragraph?" (editor overlay query)
-- "Which markdown text does this entity refer to?" (rendering query)
+- "What semantics exist for this paragraph?" (editor overlay query — interval overlap search)
+- "Which markdown text does this entity refer to?" (rendering query — direct HashMap lookup)
 
-`BTreeMap` is used for the markdown-to-semantic direction so that range lookups are efficient (find all entities overlapping a given span).
+An interval tree is required for the markdown-to-semantic direction because the core query is "find all entities whose byte span overlaps a given range," which is an interval overlap query. A `BTreeMap<Range>` cannot answer this efficiently. The `lapper` crate provides a simple, performant interval tree suitable for this use case.
 
 ---
 
@@ -169,7 +190,7 @@ Turtle-inspired syntax extended with span anchors. Turtle was chosen because:
 ```turtle
 @source-hash "sha256:a1b2c3d4e5f6..." .
 @prefix schema: <http://schema.org/> .
-@prefix sd: <sparkdown:vocab/> .
+@prefix sd: <urn:sparkdown:vocab/> .
 @prefix dc: <http://purl.org/dc/elements/1.1/> .
 
 # Document-level
@@ -201,9 +222,45 @@ _:s1 [1200..1450] a sd:Section ;
 
 - `@source-hash` — SHA-256 of the `.md` file at last sync. Detects drift.
 - `[start..end]` — byte span anchor after the blank node ID. `[0..]` means whole document. Only on entity declarations, not relationship triples.
-- `sd:snippet` — short content fingerprint (~40 chars). For diagnostics and readability only, never used for anchoring logic.
+- `sd:snippet` — short content fingerprint (~40 chars). Serialized form of the `Anchor.snippet` field. Used by the sync engine for staleness verification (Step 3 of the sync algorithm) and for human readability in the sidecar file. Not used for primary anchoring — byte spans are authoritative.
 - Blank node IDs (`_:e1`) are stable within the file. The AI agent assigns them and they persist across edits.
 - Standard Turtle rules: `;` continues subject, `.` ends statement, `#` for comments.
+
+### Grammar (Informal PEG)
+
+```peg
+document      = header entity_block* relationship_block*
+header        = source_hash prefix*
+source_hash   = "@source-hash" WS QUOTED_STRING WS "." NL
+prefix        = "@prefix" WS PREFIX_ID ":" WS "<" IRI ">" WS "." NL
+
+entity_block  = BLANK_NODE WS anchor WS predicate_list "." NL
+anchor        = "[" INTEGER ".." INTEGER? "]"    // missing end = usize::MAX (open-ended)
+
+relationship_block = BLANK_NODE WS predicate_list "." NL  // no anchor
+
+predicate_list = predicate (";" WS predicate)*
+predicate      = CURIE_OR_A WS object
+object         = BLANK_NODE / QUOTED_STRING / CURIE
+
+BLANK_NODE     = "_:" [a-zA-Z][a-zA-Z0-9]*      // e.g., _:e1, _:doc, _:s3
+PREFIX_ID      = [a-zA-Z][a-zA-Z0-9]*
+CURIE          = PREFIX_ID ":" [a-zA-Z][a-zA-Z0-9]*
+CURIE_OR_A     = CURIE / "a"                     // "a" is shorthand for rdf:type
+QUOTED_STRING  = '"' [^"]* '"'
+INTEGER        = [0-9]+
+WS             = [ \t]+
+NL             = "\n"
+COMMENT        = "#" [^\n]* NL                   // allowed on any line, ignored
+```
+
+**Parsing rules:**
+- `@source-hash` must appear first, before any `@prefix` declarations.
+- Entity blocks (with anchors) and relationship blocks (without) may appear in any order after the header.
+- Whitespace between `_:e1` and `[142..158]` is required (one or more spaces/tabs).
+- Comments (`#`) may appear on their own line or at the end of a statement line, but not mid-statement between `;` continuations.
+- Blank node IDs are case-sensitive.
+- Multi-line statements (using `;` continuation) are supported for both entity and relationship blocks.
 
 ### What This Is NOT
 
@@ -263,14 +320,22 @@ The sync engine is deterministic and fast (pure offset math). It flags but never
 - **Stale:** Re-read anchored text, decide if annotation is still correct, update or remove.
 - **Detached:** Decide if entity should be re-anchored elsewhere, removed, or kept as unanchored fact.
 
+### Relationship Cascade
+
+When an entity's status changes, relationship triples referencing it are affected:
+
+- If a subject or object entity becomes **Stale**, relationship triples referencing it are flagged for AI review alongside the entity.
+- If a subject or object entity becomes **Detached**, relationship triples referencing it are also marked **Detached**. The AI must resolve the entity before the relationship can be re-established.
+- The sync engine tracks this via a dependency scan after anchor adjustment: walk all triples and propagate the worst status of their participants.
+
 ### Old Source Recovery
 
 To compute diffs, the old source is needed:
 
-- **Primary:** `git show HEAD:<file>` for the last-committed version.
+- **Primary:** `git show HEAD:<file>` for the last-committed version. This may not match `@source-hash` exactly if multiple commits have occurred since the last overlay sync. This is an accepted trade-off: diffing against HEAD may produce more `Stale` flags than strictly necessary, but it is simple and correct (no false negatives, only false positives on staleness).
 - **Fallback:** If git unavailable, mark all anchors `Stale` (safe but requires full AI re-review).
 
-The `@source-hash` in the sidecar detects when a diff is needed.
+The `@source-hash` in the sidecar detects when a diff is needed. The hash is compared against the current file, not against any git state.
 
 ---
 
@@ -291,13 +356,13 @@ crates/sparkdown-overlay/
 ├── Cargo.toml
 ```
 
-**Dependencies:** `sparkdown-core` (for AST types, PrefixMap), `sparkdown-ontology` (for validation), `similar` (diffing), `oxrdf` (IRI handling).
+**Dependencies:** `sparkdown-core` (for AST types, PrefixMap), `sparkdown-ontology` (for validation), `similar` (diffing), `oxrdf` (IRI handling), `lapper` (interval tree for mapping index).
 
 ### Changes to Existing Crates
 
 **sparkdown-core** — No breaking changes. `annotations` on `SemanticNode` stays for legacy mode.
 
-**sparkdown-ontology** — Small addition: the `sd:` vocabulary as a built-in ontology provider alongside schema.org, Dublin Core, and FOAF.
+**sparkdown-ontology** — Small addition: the `sd:` vocabulary (`urn:sparkdown:vocab/`) as a built-in ontology provider alongside schema.org, Dublin Core, and FOAF. The `sd:` prefix is added to `PrefixMap::seed_builtins()` so it is available by default without explicit declaration.
 
 **sparkdown-render** — Alternate entry point: render from `SemanticGraph` directly (for RDF export). HTML+RDFa renderer can merge markdown AST + overlay when both are present.
 
@@ -320,7 +385,7 @@ Three operating modes:
 
 1. **Legacy mode** — inline annotations in markdown, no sidecar. Works exactly like today.
 2. **Overlay mode** — clean markdown + `.sparkdown-sem` sidecar. The primary new workflow.
-3. **Hybrid mode** — inline annotations parsed and merged into semantic graph on load.
+3. **Hybrid mode** — inline annotations parsed and merged into semantic graph on load. **Conflict resolution:** sidecar annotations take precedence. If both an inline annotation and a sidecar entity annotate the same span with conflicting types or properties, the sidecar wins. Inline annotations that have no sidecar counterpart are imported as-is. The `overlay status` command reports conflicts so the user can resolve them explicitly.
 
 Migration via `sparkdown overlay import`:
 
@@ -339,7 +404,7 @@ sparkdown overlay import article.md
 
 | Module | Coverage |
 |--------|----------|
-| `sidecar.rs` | Round-trip parse/serialize, invalid syntax errors |
+| `sidecar.rs` | Round-trip parse/serialize. Error cases: missing `@source-hash`, duplicate blank node IDs, malformed anchors (`[..10]`, `[-5..10]`, `[10..5]`), anchors on relationship triples, unresolved prefixes, unterminated strings, missing `.` terminator |
 | `anchor.rs` | Overlap detection, span arithmetic edge cases, empty spans, `[0..]` |
 | `sync.rs` | Insert before/after/inside anchor, delete spanning multiple anchors, replace changing length, status transitions, snippet verification |
 | `mapping.rs` | Build from graph + AST, query both directions, overlapping spans |
