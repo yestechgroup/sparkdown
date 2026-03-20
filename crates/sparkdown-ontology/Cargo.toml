@@ -1,0 +1,8 @@
+[package]
+name = "sparkdown-ontology"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+oxrdf = { workspace = true }
