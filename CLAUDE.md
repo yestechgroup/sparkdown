@@ -26,6 +26,9 @@ crates/
   sparkdown-render/     # Renderers: HTML+RDFa, JSON-LD, Turtle
   sparkdown-overlay/    # Semantic overlay: graph, anchors, sidecar, sync engine
   sparkdown-cli/        # CLI (clap-based): render, validate, extract, init, overlay
+studio/
+  src/                  # Svelte 5 frontend (components, stores, editor extensions)
+  src-tauri/            # Tauri 2 Rust backend (session actors, IPC commands, events)
 ```
 
 ## Code Conventions
@@ -42,6 +45,20 @@ crates/
 - **Anchor staleness**: When markdown is edited, the sync engine (`sparkdown-overlay/src/sync.rs`) diffs the old and new text, adjusts anchors, and marks entities as stale if their anchored text changed.
 - **Three modes**: Legacy (inline annotations only), Overlay (sidecar only), Hybrid (both). Mode is declared in YAML frontmatter.
 - **Prefix maps**: Namespace prefixes (e.g., `schema:`, `dc:`) are declared in frontmatter and resolved by `sparkdown-core`.
+
+## Studio Dev Mode
+
+Sparkdown Studio is a Tauri 2 desktop app (Svelte 5 + CodeMirror 6 frontend). The studio crate depends on all five sparkdown crates.
+
+```bash
+cd studio
+pnpm install          # install frontend dependencies
+cargo tauri dev       # start Vite dev server (localhost:1420) + Tauri desktop window
+```
+
+For frontend-only work: `pnpm dev` runs the Vite server standalone on `http://localhost:1420`.
+
+Key config: `studio/src-tauri/tauri.conf.json` defines the dev URL, build commands, and window settings.
 
 ## Design Spec
 
