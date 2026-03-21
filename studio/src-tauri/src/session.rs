@@ -13,7 +13,8 @@ use tokio::sync::mpsc;
 use crate::events;
 use crate::registry::SessionCommand;
 use crate::types::{
-    byte_to_char_offset, DocId, EntityDto, EntityStatus, Relation, SidecarStatus,
+    byte_to_char_offset, char_to_byte_offset, DocId, DocumentOverviewDto, EntityDetailDto,
+    EntityDto, EntityStatus, Relation, SidecarStatus,
 };
 
 /// Owns all state for a single open document. Runs as a tokio task.
@@ -24,6 +25,7 @@ pub struct DocumentSession {
     graph: SemanticGraph,
     index: MappingIndex,
     parser: SparkdownParser,
+    next_entity_id: usize,
     _registry: ThemeRegistry,
     app: AppHandle,
 }
@@ -91,6 +93,7 @@ impl DocumentSession {
         };
 
         let index = MappingIndex::build(&graph);
+        let next_entity_id = graph.entities.len() + 1;
         let registry = ThemeRegistry::with_builtins();
 
         let (tx, rx) = mpsc::channel::<SessionCommand>(32);
@@ -102,6 +105,7 @@ impl DocumentSession {
             graph,
             index,
             parser,
+            next_entity_id,
             _registry: registry,
             app: app.clone(),
         };
@@ -144,6 +148,41 @@ impl DocumentSession {
                     let _ = reply.send(result);
                 }
                 SessionCommand::Close => break,
+                SessionCommand::CreateEntity {
+                    span_start,
+                    span_end,
+                    type_iri,
+                    reply,
+                } => {
+                    let result = self.handle_create_entity(span_start, span_end, type_iri);
+                    if result.is_ok() {
+                        self.emit_entity_events();
+                    }
+                    let _ = reply.send(result);
+                }
+                SessionCommand::UpdateStaleAnchor { entity_id, reply } => {
+                    let result = self.handle_update_stale_anchor(&entity_id);
+                    if result.is_ok() {
+                        self.emit_entity_events();
+                        self.emit_stale_anchors();
+                    }
+                    let _ = reply.send(result);
+                }
+                SessionCommand::GetDocumentOverview { reply } => {
+                    let overview = self.handle_get_document_overview();
+                    let _ = reply.send(overview);
+                }
+                SessionCommand::GetEntityDetail { entity_id, reply } => {
+                    let result = self.handle_get_entity_detail(&entity_id);
+                    let _ = reply.send(result);
+                }
+                SessionCommand::DeleteEntity { entity_id, reply } => {
+                    let result = self.handle_delete_entity(&entity_id);
+                    if result.is_ok() {
+                        self.emit_entity_events();
+                    }
+                    let _ = reply.send(result);
+                }
             }
         }
     }
@@ -282,6 +321,240 @@ impl DocumentSession {
             .map_err(|e| format!("Failed to save sidecar: {e}"))?;
 
         Ok(())
+    }
+
+    fn handle_create_entity(
+        &mut self,
+        char_start: usize,
+        char_end: usize,
+        type_iri: String,
+    ) -> Result<EntityDto, String> {
+        if char_start >= char_end {
+            return Err("Selection must not be empty".into());
+        }
+
+        let span_start = char_to_byte_offset(&self.source, char_start);
+        let span_end = char_to_byte_offset(&self.source, char_end);
+
+        if span_end > self.source.len() {
+            return Err("Selection range exceeds document length".into());
+        }
+
+        let raw_snippet = &self.source[span_start..span_end];
+        let snippet: String = raw_snippet.chars().take(40).collect();
+
+        let entity_id = format!("e{}", self.next_entity_id);
+        self.next_entity_id += 1;
+
+        let iri =
+            oxrdf::NamedNode::new(&type_iri).map_err(|e| format!("Invalid type IRI: {e}"))?;
+
+        use sparkdown_overlay::anchor::Anchor;
+        use sparkdown_overlay::graph::{blank_node, SemanticEntity};
+
+        let entity = SemanticEntity {
+            id: blank_node(&entity_id),
+            anchor: Anchor::new(span_start..span_end, snippet),
+            types: vec![iri],
+            status: AnchorStatus::Synced,
+        };
+
+        self.graph.entities.push(entity);
+        self.index = MappingIndex::build(&self.graph);
+
+        let dto = self.entity_to_dto(self.graph.entities.last().unwrap());
+        Ok(dto)
+    }
+
+    fn handle_update_stale_anchor(&mut self, entity_id: &str) -> Result<(), String> {
+        let entity = self
+            .graph
+            .entities
+            .iter_mut()
+            .find(|e| e.id.as_str() == entity_id)
+            .ok_or_else(|| format!("Entity not found: {entity_id}"))?;
+
+        let start = entity.anchor.span.start;
+        let end = entity.anchor.span.end.min(self.source.len());
+        let new_snippet: String = self.source[start..end].chars().take(40).collect();
+        entity.anchor.snippet = new_snippet;
+        entity.status = AnchorStatus::Synced;
+
+        self.index = MappingIndex::build(&self.graph);
+        Ok(())
+    }
+
+    fn handle_get_document_overview(&self) -> DocumentOverviewDto {
+        let entities = self.build_entity_dtos();
+        let sidecar_status = self.build_sidecar_status();
+        DocumentOverviewDto {
+            title: None,
+            entities,
+            sidecar_status,
+        }
+    }
+
+    fn handle_get_entity_detail(&self, entity_id: &str) -> Result<EntityDetailDto, String> {
+        let entity = self
+            .graph
+            .entities
+            .iter()
+            .find(|e| e.id.as_str() == entity_id)
+            .ok_or_else(|| format!("Entity not found: {entity_id}"))?;
+
+        let dto = self.entity_to_dto(entity);
+
+        // All outgoing relations (no cap)
+        let all_relations: Vec<Relation> = self
+            .graph
+            .triples_for_subject(&entity.id)
+            .iter()
+            .map(|t| {
+                let predicate_label = iri_local_name(t.predicate.as_str());
+                let (target_label, target_id) = match &t.object {
+                    sparkdown_overlay::graph::TripleObject::Entity(id) => {
+                        let label = self
+                            .graph
+                            .entity_by_id(id)
+                            .map(|e| e.anchor.snippet.clone())
+                            .unwrap_or_else(|| id.as_str().to_string());
+                        (label, id.as_str().to_string())
+                    }
+                    sparkdown_overlay::graph::TripleObject::Literal { value, .. } => {
+                        (value.clone(), String::new())
+                    }
+                };
+                Relation {
+                    predicate_label,
+                    target_label,
+                    target_id,
+                }
+            })
+            .collect();
+
+        // Incoming relations
+        let incoming_relations: Vec<Relation> = self
+            .graph
+            .triples
+            .iter()
+            .filter(|t| match &t.object {
+                sparkdown_overlay::graph::TripleObject::Entity(id) => {
+                    id.as_str() == entity_id
+                }
+                _ => false,
+            })
+            .map(|t| {
+                let predicate_label = iri_local_name(t.predicate.as_str());
+                let source_label = self
+                    .graph
+                    .entity_by_id(&t.subject)
+                    .map(|e| e.anchor.snippet.clone())
+                    .unwrap_or_else(|| t.subject.as_str().to_string());
+                Relation {
+                    predicate_label,
+                    target_label: source_label,
+                    target_id: t.subject.as_str().to_string(),
+                }
+            })
+            .collect();
+
+        // Compute line number from byte offset
+        let anchor_line = self.source[..entity.anchor.span.start]
+            .chars()
+            .filter(|c| *c == '\n')
+            .count()
+            + 1;
+
+        Ok(EntityDetailDto {
+            entity: dto,
+            all_relations,
+            incoming_relations,
+            anchor_snippet: entity.anchor.snippet.clone(),
+            anchor_line,
+        })
+    }
+
+    fn handle_delete_entity(&mut self, entity_id: &str) -> Result<(), String> {
+        let existed = self.graph.entities.len();
+        self.graph
+            .entities
+            .retain(|e| e.id.as_str() != entity_id);
+        if self.graph.entities.len() == existed {
+            return Err(format!("Entity not found: {entity_id}"));
+        }
+
+        // Remove all triples referencing this entity (as subject or object)
+        self.graph.triples.retain(|t| {
+            let subject_match = t.subject.as_str() == entity_id;
+            let object_match = match &t.object {
+                sparkdown_overlay::graph::TripleObject::Entity(id) => {
+                    id.as_str() == entity_id
+                }
+                _ => false,
+            };
+            !subject_match && !object_match
+        });
+
+        self.index = MappingIndex::build(&self.graph);
+        Ok(())
+    }
+
+    /// Emit entities-updated and sidecar-status events.
+    fn emit_entity_events(&self) {
+        let dtos = self.build_entity_dtos();
+        let status = self.build_sidecar_status();
+        events::emit_entities_updated(
+            &self.app,
+            events::EntitiesUpdatedPayload {
+                doc_id: self.doc_id.clone(),
+                entities: dtos,
+            },
+        );
+        events::emit_sidecar_status(
+            &self.app,
+            events::SidecarStatusPayload {
+                doc_id: self.doc_id.clone(),
+                status,
+            },
+        );
+    }
+
+    /// Emit stale-anchors event with current stale entities.
+    fn emit_stale_anchors(&self) {
+        let stale: Vec<_> = self
+            .graph
+            .entities
+            .iter()
+            .filter(|e| e.status == AnchorStatus::Stale)
+            .map(|e| {
+                let span_start = byte_to_char_offset(&self.source, e.anchor.span.start);
+                let span_end = byte_to_char_offset(
+                    &self.source,
+                    e.anchor.span.end.min(self.source.len()),
+                );
+                crate::types::StaleAnchor {
+                    entity_id: e.id.as_str().to_string(),
+                    old_snippet: e.anchor.snippet.clone(),
+                    new_text: self
+                        .source
+                        .get(e.anchor.span.start..e.anchor.span.end.min(self.source.len()))
+                        .unwrap_or("")
+                        .chars()
+                        .take(40)
+                        .collect(),
+                    span_start,
+                    span_end,
+                }
+            })
+            .collect();
+
+        events::emit_stale_anchors(
+            &self.app,
+            events::StaleAnchorsPayload {
+                doc_id: self.doc_id.clone(),
+                anchors: stale,
+            },
+        );
     }
 
     fn build_entity_dtos(&self) -> Vec<EntityDto> {
