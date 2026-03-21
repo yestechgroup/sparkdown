@@ -1,0 +1,26 @@
+@source-hash "sha256:0000000000000000000000000000000000000000000000000000000000000000" .
+@prefix schema: <http://schema.org/> .
+@prefix sd: <urn:sparkdown:vocab/> .
+
+# Document-level
+_:doc [0..] a schema:Event ;
+    schema:name "RustConf 2026" ;
+    schema:startDate "2026-09-10" ;
+    schema:endDate "2026-09-12" .
+
+# Entities
+_:e1 [81..94] a schema:Person ;
+    sd:snippet "Niko Matsakis" .
+
+_:e2 [139..147] a schema:Place ;
+    schema:name "Portland" ;
+    sd:snippet "Portland" .
+
+# Relationships
+_:e1 schema:performerIn _:doc .
+_:doc schema:location _:e2 .
+
+# Rhetorical structure
+_:s1 [149..218] a sd:Section ;
+    sd:role sd:Review ;
+    sd:snippet "An excellent conference" .

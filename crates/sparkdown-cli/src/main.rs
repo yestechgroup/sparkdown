@@ -47,6 +47,45 @@ enum Commands {
         #[arg(short = 't', long, default_value = "article")]
         doc_type: String,
     },
+    /// Manage semantic overlay sidecar files
+    Overlay {
+        #[command(subcommand)]
+        command: OverlayCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum OverlayCommands {
+    /// Create empty .sparkdown-sem for a .md file
+    Init {
+        /// Input markdown file
+        input: String,
+    },
+    /// Run sync engine after markdown edits
+    Sync {
+        /// Input markdown file
+        input: String,
+    },
+    /// Show stale/detached entities
+    Status {
+        /// Input markdown file
+        input: String,
+    },
+    /// Strip anchors, produce valid Turtle
+    Export {
+        /// Input markdown file
+        input: String,
+    },
+    /// Combined view (markdown + inline annotations) for debugging
+    Merge {
+        /// Input markdown file
+        input: String,
+    },
+    /// Extract inline annotations from legacy .md into sidecar
+    Import {
+        /// Input markdown file
+        input: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -61,5 +100,13 @@ fn main() -> Result<()> {
         Commands::Validate { input, level } => commands::validate::run(&input, &level),
         Commands::Extract { input, format } => commands::extract::run(&input, &format),
         Commands::Init { output, doc_type } => commands::init::run(&output, &doc_type),
+        Commands::Overlay { command } => match command {
+            OverlayCommands::Init { input } => commands::overlay::init(&input),
+            OverlayCommands::Sync { input } => commands::overlay::sync(&input),
+            OverlayCommands::Status { input } => commands::overlay::status(&input),
+            OverlayCommands::Export { input } => commands::overlay::export(&input),
+            OverlayCommands::Merge { input } => commands::overlay::merge(&input),
+            OverlayCommands::Import { input } => commands::overlay::import(&input),
+        },
     }
 }

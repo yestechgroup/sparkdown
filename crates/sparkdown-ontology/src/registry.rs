@@ -86,6 +86,9 @@ impl ThemeRegistry {
             crate::builtins::dublin_core::DublinCoreProvider::new(),
         ));
         reg.register(Box::new(crate::builtins::foaf::FoafProvider::new()));
+        reg.register(Box::new(
+            crate::builtins::sparkdown::SparkdownProvider::new(),
+        ));
         reg
     }
 
