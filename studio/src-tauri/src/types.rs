@@ -71,9 +71,53 @@ pub struct WorkspaceInfo {
     pub files: Vec<FileEntry>,
 }
 
+/// Detailed entity information for the Knowledge Panel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityDetailDto {
+    pub id: String,
+    pub label: String,
+    pub type_iris: Vec<String>,
+    pub type_prefix: String,
+    pub span_start: usize,
+    pub span_end: usize,
+    pub status: EntityStatus,
+    pub properties: Vec<PropertyDto>,
+    pub incoming_relations: Vec<IncomingRelation>,
+}
+
+/// A property (predicate + literal value) on an entity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PropertyDto {
+    pub predicate_label: String,
+    pub predicate_iri: String,
+    pub value: String,
+}
+
+/// An incoming relation from another entity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncomingRelation {
+    pub subject_id: String,
+    pub subject_label: String,
+    pub predicate_label: String,
+}
+
 /// Maps byte offset to UTF-16 character offset for CodeMirror compatibility.
 pub fn byte_to_char_offset(source: &str, byte_offset: usize) -> usize {
     source[..byte_offset].encode_utf16().count()
+}
+
+/// Maps UTF-16 character offset back to byte offset.
+pub fn char_to_byte_offset(source: &str, char_offset: usize) -> usize {
+    let mut byte_pos = 0;
+    let mut char_count = 0;
+    for ch in source.chars() {
+        if char_count >= char_offset {
+            break;
+        }
+        char_count += ch.len_utf16();
+        byte_pos += ch.len_utf8();
+    }
+    byte_pos
 }
 
 #[cfg(test)]
@@ -125,5 +169,55 @@ mod tests {
         };
         let json = serde_json::to_string(&status).unwrap();
         assert!(json.contains("\"synced\":3"));
+    }
+
+    #[test]
+    fn char_to_byte_ascii() {
+        assert_eq!(char_to_byte_offset("hello world", 5), 5);
+    }
+
+    #[test]
+    fn char_to_byte_multibyte() {
+        let s = "caf\u{00e9}!"; // é is 2 bytes in UTF-8, 1 UTF-16 code unit
+        assert_eq!(char_to_byte_offset(s, 3), 3); // "caf"
+        assert_eq!(char_to_byte_offset(s, 4), 5); // "café" = 4 chars, 5 bytes
+    }
+
+    #[test]
+    fn char_byte_roundtrip() {
+        let s = "Hello café world";
+        for byte_off in [0, 5, 6, 11, 12] {
+            if byte_off <= s.len() && s.is_char_boundary(byte_off) {
+                let char_off = byte_to_char_offset(s, byte_off);
+                assert_eq!(char_to_byte_offset(s, char_off), byte_off);
+            }
+        }
+    }
+
+    #[test]
+    fn entity_detail_dto_serializes() {
+        let detail = EntityDetailDto {
+            id: "_:e1".into(),
+            label: "Niko".into(),
+            type_iris: vec!["http://schema.org/Person".into()],
+            type_prefix: "schema:Person".into(),
+            span_start: 0,
+            span_end: 4,
+            status: EntityStatus::Synced,
+            properties: vec![PropertyDto {
+                predicate_label: "name".into(),
+                predicate_iri: "http://schema.org/name".into(),
+                value: "Niko Matsakis".into(),
+            }],
+            incoming_relations: vec![IncomingRelation {
+                subject_id: "_:e2".into(),
+                subject_label: "RustConf".into(),
+                predicate_label: "performer".into(),
+            }],
+        };
+        let json = serde_json::to_string(&detail).unwrap();
+        assert!(json.contains("properties"));
+        assert!(json.contains("incoming_relations"));
+        assert!(json.contains("Niko Matsakis"));
     }
 }

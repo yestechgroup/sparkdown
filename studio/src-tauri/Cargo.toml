@@ -20,6 +20,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 sha2 = "0.10"
+oxrdf = { workspace = true }
 
 [build-dependencies]
 tauri-build = { version = "2" }

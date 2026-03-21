@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use oxrdf::{BlankNode, NamedNode};
 use sparkdown_core::parser::SparkdownParser;
 use sparkdown_ontology::registry::ThemeRegistry;
 use sparkdown_overlay::anchor::AnchorStatus;
@@ -13,7 +14,8 @@ use tokio::sync::mpsc;
 use crate::events;
 use crate::registry::SessionCommand;
 use crate::types::{
-    byte_to_char_offset, DocId, EntityDto, EntityStatus, Relation, SidecarStatus,
+    byte_to_char_offset, char_to_byte_offset, DocId, EntityDetailDto, EntityDto, EntityStatus,
+    IncomingRelation, PropertyDto, Relation, SidecarStatus,
 };
 
 /// Owns all state for a single open document. Runs as a tokio task.
@@ -26,6 +28,10 @@ pub struct DocumentSession {
     parser: SparkdownParser,
     _registry: ThemeRegistry,
     app: AppHandle,
+    /// Monotonic counter for generating unique entity IDs.
+    next_entity_id: u32,
+    /// Tracks the file's mtime at last load or save, for external modification detection.
+    last_known_mtime: Option<std::time::SystemTime>,
 }
 
 impl DocumentSession {
@@ -93,6 +99,25 @@ impl DocumentSession {
         let index = MappingIndex::build(&graph);
         let registry = ThemeRegistry::with_builtins();
 
+        // Determine next entity ID from existing graph
+        let next_entity_id = graph
+            .entities
+            .iter()
+            .filter_map(|e| {
+                e.id.as_str()
+                    .strip_prefix("e")
+                    .and_then(|n| n.parse::<u32>().ok())
+            })
+            .max()
+            .map(|m| m + 1)
+            .unwrap_or(1);
+
+        // Record file mtime for modification detection
+        let last_known_mtime = tokio::fs::metadata(&file_path)
+            .await
+            .ok()
+            .and_then(|m| m.modified().ok());
+
         let (tx, rx) = mpsc::channel::<SessionCommand>(32);
 
         let session = DocumentSession {
@@ -104,6 +129,8 @@ impl DocumentSession {
             parser,
             _registry: registry,
             app: app.clone(),
+            next_entity_id,
+            last_known_mtime,
         };
 
         // Emit initial state
@@ -144,6 +171,52 @@ impl DocumentSession {
                     let _ = reply.send(result);
                 }
                 SessionCommand::Close => break,
+
+                // Phase 2 commands
+                SessionCommand::CreateEntity {
+                    span_start,
+                    span_end,
+                    type_iri,
+                    reply,
+                } => {
+                    let result = self.handle_create_entity(span_start, span_end, &type_iri);
+                    let _ = reply.send(result);
+                }
+                SessionCommand::UpdateStaleAnchor { entity_id, reply } => {
+                    let result = self.handle_update_stale_anchor(&entity_id);
+                    let _ = reply.send(result);
+                }
+                SessionCommand::DismissSuggestion { entity_id, reply } => {
+                    let result = self.handle_dismiss_suggestion(&entity_id);
+                    let _ = reply.send(result);
+                }
+                SessionCommand::GetAllEntities { reply } => {
+                    let entities = self.build_entity_dtos();
+                    let _ = reply.send(entities);
+                }
+                SessionCommand::GetEntityDetails { entity_id, reply } => {
+                    let result = self.handle_get_entity_details(&entity_id);
+                    let _ = reply.send(result);
+                }
+                SessionCommand::AddTriple {
+                    subject_id,
+                    predicate_iri,
+                    object_value,
+                    object_is_entity,
+                    reply,
+                } => {
+                    let result = self.handle_add_triple(
+                        &subject_id,
+                        &predicate_iri,
+                        &object_value,
+                        object_is_entity,
+                    );
+                    let _ = reply.send(result);
+                }
+                SessionCommand::CheckFileModified { reply } => {
+                    let result = self.handle_check_file_modified().await;
+                    let _ = reply.send(result);
+                }
             }
         }
     }
@@ -268,7 +341,307 @@ impl DocumentSession {
         String::from_utf8(buf).map_err(|e| e.to_string())
     }
 
-    async fn handle_save(&self) -> Result<(), String> {
+    // --- Phase 2 handlers ---
+
+    fn handle_create_entity(
+        &mut self,
+        span_start: usize,
+        span_end: usize,
+        type_iri: &str,
+    ) -> Result<EntityDto, String> {
+        use sparkdown_overlay::anchor::Anchor;
+        use sparkdown_overlay::graph::SemanticEntity;
+
+        // Convert char offsets from CM to byte offsets
+        let byte_start = char_to_byte_offset(&self.source, span_start);
+        let byte_end = char_to_byte_offset(&self.source, span_end);
+
+        let snippet: String = self
+            .source
+            .get(byte_start..byte_end.min(self.source.len()))
+            .unwrap_or("")
+            .chars()
+            .take(40)
+            .collect();
+
+        let entity_id_str = format!("e{}", self.next_entity_id);
+        self.next_entity_id += 1;
+
+        let blank_node = BlankNode::new(&entity_id_str)
+            .map_err(|e| format!("Invalid blank node: {e}"))?;
+
+        let named_node = NamedNode::new(type_iri)
+            .map_err(|e| format!("Invalid IRI: {e}"))?;
+
+        let entity = SemanticEntity {
+            id: blank_node,
+            anchor: Anchor::new(byte_start..byte_end, &snippet),
+            types: vec![named_node],
+            status: AnchorStatus::Synced,
+        };
+
+        self.graph.entities.push(entity);
+        self.index = MappingIndex::build(&self.graph);
+
+        // Emit updated state
+        let entities = self.build_entity_dtos();
+        events::emit_entities_updated(
+            &self.app,
+            events::EntitiesUpdatedPayload {
+                doc_id: self.doc_id.clone(),
+                entities: entities.clone(),
+            },
+        );
+        let status = self.build_sidecar_status();
+        events::emit_sidecar_status(
+            &self.app,
+            events::SidecarStatusPayload {
+                doc_id: self.doc_id.clone(),
+                status,
+            },
+        );
+
+        // Return the newly created entity DTO
+        let new_entity = self
+            .graph
+            .entities
+            .last()
+            .map(|e| self.entity_to_dto(e))
+            .ok_or("Entity creation failed")?;
+
+        Ok(new_entity)
+    }
+
+    fn handle_update_stale_anchor(&mut self, entity_id: &str) -> Result<(), String> {
+        let blank_node = BlankNode::new(entity_id)
+            .map_err(|e| format!("Invalid entity ID: {e}"))?;
+
+        let entity = self
+            .graph
+            .entity_by_id_mut(&blank_node)
+            .ok_or_else(|| format!("Entity not found: {entity_id}"))?;
+
+        if entity.status != AnchorStatus::Stale {
+            return Err("Entity is not stale".into());
+        }
+
+        // Update the snippet to the current text at the anchor span
+        let new_snippet: String = self
+            .source
+            .get(entity.anchor.span.start..entity.anchor.span.end.min(self.source.len()))
+            .unwrap_or("")
+            .chars()
+            .take(40)
+            .collect();
+        entity.anchor.snippet = new_snippet;
+        entity.status = AnchorStatus::Synced;
+
+        self.index = MappingIndex::build(&self.graph);
+
+        // Emit updated state
+        let entities = self.build_entity_dtos();
+        events::emit_entities_updated(
+            &self.app,
+            events::EntitiesUpdatedPayload {
+                doc_id: self.doc_id.clone(),
+                entities,
+            },
+        );
+        let status = self.build_sidecar_status();
+        events::emit_sidecar_status(
+            &self.app,
+            events::SidecarStatusPayload {
+                doc_id: self.doc_id.clone(),
+                status,
+            },
+        );
+
+        Ok(())
+    }
+
+    fn handle_dismiss_suggestion(&mut self, entity_id: &str) -> Result<(), String> {
+        let blank_node = BlankNode::new(entity_id)
+            .map_err(|e| format!("Invalid entity ID: {e}"))?;
+
+        // Remove entity and its triples
+        self.graph
+            .entities
+            .retain(|e| e.id.as_str() != blank_node.as_str());
+        self.graph
+            .triples
+            .retain(|t| t.subject.as_str() != blank_node.as_str());
+
+        self.index = MappingIndex::build(&self.graph);
+
+        let entities = self.build_entity_dtos();
+        events::emit_entities_updated(
+            &self.app,
+            events::EntitiesUpdatedPayload {
+                doc_id: self.doc_id.clone(),
+                entities,
+            },
+        );
+        let status = self.build_sidecar_status();
+        events::emit_sidecar_status(
+            &self.app,
+            events::SidecarStatusPayload {
+                doc_id: self.doc_id.clone(),
+                status,
+            },
+        );
+
+        Ok(())
+    }
+
+    fn handle_get_entity_details(&self, entity_id: &str) -> Result<EntityDetailDto, String> {
+        let blank_node = BlankNode::new(entity_id)
+            .map_err(|e| format!("Invalid entity ID: {e}"))?;
+
+        let entity = self
+            .graph
+            .entity_by_id(&blank_node)
+            .ok_or_else(|| format!("Entity not found: {entity_id}"))?;
+
+        let span_start = byte_to_char_offset(&self.source, entity.anchor.span.start);
+        let span_end = byte_to_char_offset(
+            &self.source,
+            entity.anchor.span.end.min(self.source.len()),
+        );
+
+        let type_iris: Vec<String> = entity.types.iter().map(|t| t.as_str().to_string()).collect();
+        let type_prefix = entity
+            .types
+            .first()
+            .map(|t| iri_to_curie(t.as_str()))
+            .unwrap_or_default();
+        let status = match entity.status {
+            AnchorStatus::Synced => EntityStatus::Synced,
+            AnchorStatus::Stale => EntityStatus::Stale,
+            AnchorStatus::Detached => EntityStatus::Detached,
+        };
+
+        // All triples where this entity is the subject
+        let subject_triples = self.graph.triples_for_subject(&blank_node);
+        let mut properties = Vec::new();
+
+        for t in &subject_triples {
+            match &t.object {
+                sparkdown_overlay::graph::TripleObject::Literal { value, .. } => {
+                    properties.push(PropertyDto {
+                        predicate_label: iri_local_name(t.predicate.as_str()),
+                        predicate_iri: t.predicate.as_str().to_string(),
+                        value: value.clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        // All triples where this entity is referenced as object
+        let mut incoming_relations = Vec::new();
+        for t in &self.graph.triples {
+            if let sparkdown_overlay::graph::TripleObject::Entity(ref obj_bn) = t.object {
+                if obj_bn.as_str() == entity_id {
+                    let subject_label = self
+                        .graph
+                        .entity_by_id(&t.subject)
+                        .map(|e| e.anchor.snippet.clone())
+                        .unwrap_or_else(|| t.subject.as_str().to_string());
+                    incoming_relations.push(IncomingRelation {
+                        subject_id: t.subject.as_str().to_string(),
+                        subject_label,
+                        predicate_label: iri_local_name(t.predicate.as_str()),
+                    });
+                }
+            }
+        }
+
+        Ok(EntityDetailDto {
+            id: entity.id.as_str().to_string(),
+            label: entity.anchor.snippet.clone(),
+            type_iris,
+            type_prefix,
+            span_start,
+            span_end,
+            status,
+            properties,
+            incoming_relations,
+        })
+    }
+
+    fn handle_add_triple(
+        &mut self,
+        subject_id: &str,
+        predicate_iri: &str,
+        object_value: &str,
+        object_is_entity: bool,
+    ) -> Result<(), String> {
+        use sparkdown_overlay::graph::{Triple, TripleObject};
+
+        let subject = BlankNode::new(subject_id)
+            .map_err(|e| format!("Invalid subject ID: {e}"))?;
+        let predicate = NamedNode::new(predicate_iri)
+            .map_err(|e| format!("Invalid predicate IRI: {e}"))?;
+
+        // Verify subject entity exists
+        if self.graph.entity_by_id(&subject).is_none() {
+            return Err(format!("Subject entity not found: {subject_id}"));
+        }
+
+        let object = if object_is_entity {
+            let obj_bn = BlankNode::new(object_value)
+                .map_err(|e| format!("Invalid object entity ID: {e}"))?;
+            TripleObject::Entity(obj_bn)
+        } else {
+            TripleObject::Literal {
+                value: object_value.to_string(),
+                datatype: None,
+            }
+        };
+
+        self.graph.triples.push(Triple {
+            subject,
+            predicate,
+            object,
+        });
+
+        // Emit updated state
+        let entities = self.build_entity_dtos();
+        events::emit_entities_updated(
+            &self.app,
+            events::EntitiesUpdatedPayload {
+                doc_id: self.doc_id.clone(),
+                entities,
+            },
+        );
+        let status = self.build_sidecar_status();
+        events::emit_sidecar_status(
+            &self.app,
+            events::SidecarStatusPayload {
+                doc_id: self.doc_id.clone(),
+                status,
+            },
+        );
+
+        Ok(())
+    }
+
+    async fn handle_check_file_modified(&self) -> Result<bool, String> {
+        let meta = tokio::fs::metadata(&self.file_path)
+            .await
+            .map_err(|e| format!("Cannot stat file: {e}"))?;
+
+        let current_mtime = meta.modified().map_err(|e| format!("No mtime: {e}"))?;
+
+        Ok(self
+            .last_known_mtime
+            .map(|known| current_mtime != known)
+            .unwrap_or(false))
+    }
+
+    // --- End Phase 2 handlers ---
+
+    async fn handle_save(&mut self) -> Result<(), String> {
         // Write source
         tokio::fs::write(&self.file_path, &self.source)
             .await
@@ -280,6 +653,12 @@ impl DocumentSession {
         tokio::fs::write(&sidecar_path, &sidecar_content)
             .await
             .map_err(|e| format!("Failed to save sidecar: {e}"))?;
+
+        // Update tracked mtime
+        self.last_known_mtime = tokio::fs::metadata(&self.file_path)
+            .await
+            .ok()
+            .and_then(|m| m.modified().ok());
 
         Ok(())
     }

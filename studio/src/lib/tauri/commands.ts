@@ -43,6 +43,32 @@ export interface WorkspaceInfo {
   files: FileEntry[];
 }
 
+// Phase 2 types
+
+export interface EntityDetailDto {
+  id: string;
+  label: string;
+  type_iris: string[];
+  type_prefix: string;
+  span_start: number;
+  span_end: number;
+  status: 'synced' | 'stale' | 'detached';
+  properties: PropertyDto[];
+  incoming_relations: IncomingRelation[];
+}
+
+export interface PropertyDto {
+  predicate_label: string;
+  predicate_iri: string;
+  value: string;
+}
+
+export interface IncomingRelation {
+  subject_id: string;
+  subject_label: string;
+  predicate_label: string;
+}
+
 export async function openWorkspace(): Promise<WorkspaceInfo> {
   return invoke('open_workspace');
 }
@@ -73,4 +99,45 @@ export async function exportDocument(docId: string, format: 'html_rdfa' | 'json_
 
 export async function saveDocument(docId: string): Promise<void> {
   return invoke('save_document', { docId });
+}
+
+// Phase 2 commands
+
+export async function createEntity(
+  docId: string,
+  spanStart: number,
+  spanEnd: number,
+  typeIri: string,
+): Promise<EntityDto> {
+  return invoke('create_entity', { docId, spanStart, spanEnd, typeIri });
+}
+
+export async function updateStaleAnchor(docId: string, entityId: string): Promise<void> {
+  return invoke('update_stale_anchor', { docId, entityId });
+}
+
+export async function dismissSuggestion(docId: string, entityId: string): Promise<void> {
+  return invoke('dismiss_suggestion', { docId, entityId });
+}
+
+export async function getAllEntities(docId: string): Promise<EntityDto[]> {
+  return invoke('get_all_entities', { docId });
+}
+
+export async function getEntityDetails(docId: string, entityId: string): Promise<EntityDetailDto> {
+  return invoke('get_entity_details', { docId, entityId });
+}
+
+export async function addTriple(
+  docId: string,
+  subjectId: string,
+  predicateIri: string,
+  objectValue: string,
+  objectIsEntity: boolean,
+): Promise<void> {
+  return invoke('add_triple', { docId, subjectId, predicateIri, objectValue, objectIsEntity });
+}
+
+export async function checkFileModified(docId: string): Promise<boolean> {
+  return invoke('check_file_modified', { docId });
 }

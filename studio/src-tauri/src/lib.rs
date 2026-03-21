@@ -22,6 +22,14 @@ pub fn run() {
             commands::get_entities_at,
             commands::export_document,
             commands::save_document,
+            // Phase 2
+            commands::create_entity,
+            commands::update_stale_anchor,
+            commands::dismiss_suggestion,
+            commands::get_all_entities,
+            commands::get_entity_details,
+            commands::add_triple,
+            commands::check_file_modified,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sparkdown Studio");

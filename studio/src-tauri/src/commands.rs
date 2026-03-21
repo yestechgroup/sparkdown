@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 
 use crate::registry::{SessionCommand, SessionRegistry};
 use crate::session::DocumentSession;
-use crate::types::{DocId, EntityDto, FileEntry, RenderFormat, WorkspaceInfo};
+use crate::types::{DocId, EntityDetailDto, EntityDto, FileEntry, RenderFormat, WorkspaceInfo};
 
 #[tauri::command]
 pub async fn open_workspace(app: AppHandle) -> Result<WorkspaceInfo, String> {
@@ -130,6 +130,129 @@ pub async fn save_document(
     let tx = registry.get(&doc_id).await.ok_or("Document not open".to_string())?;
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     tx.send(SessionCommand::Save { reply: reply_tx })
+        .await
+        .map_err(|_| "Session closed".to_string())?;
+    reply_rx.await.map_err(|_| "Session dropped".to_string())?
+}
+
+// --- Phase 2 commands ---
+
+#[tauri::command]
+pub async fn create_entity(
+    registry: State<'_, Arc<SessionRegistry>>,
+    doc_id: DocId,
+    span_start: usize,
+    span_end: usize,
+    type_iri: String,
+) -> Result<EntityDto, String> {
+    let tx = registry.get(&doc_id).await.ok_or("Document not open".to_string())?;
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    tx.send(SessionCommand::CreateEntity {
+        span_start,
+        span_end,
+        type_iri,
+        reply: reply_tx,
+    })
+    .await
+    .map_err(|_| "Session closed".to_string())?;
+    reply_rx.await.map_err(|_| "Session dropped".to_string())?
+}
+
+#[tauri::command]
+pub async fn update_stale_anchor(
+    registry: State<'_, Arc<SessionRegistry>>,
+    doc_id: DocId,
+    entity_id: String,
+) -> Result<(), String> {
+    let tx = registry.get(&doc_id).await.ok_or("Document not open".to_string())?;
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    tx.send(SessionCommand::UpdateStaleAnchor {
+        entity_id,
+        reply: reply_tx,
+    })
+    .await
+    .map_err(|_| "Session closed".to_string())?;
+    reply_rx.await.map_err(|_| "Session dropped".to_string())?
+}
+
+#[tauri::command]
+pub async fn dismiss_suggestion(
+    registry: State<'_, Arc<SessionRegistry>>,
+    doc_id: DocId,
+    entity_id: String,
+) -> Result<(), String> {
+    let tx = registry.get(&doc_id).await.ok_or("Document not open".to_string())?;
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    tx.send(SessionCommand::DismissSuggestion {
+        entity_id,
+        reply: reply_tx,
+    })
+    .await
+    .map_err(|_| "Session closed".to_string())?;
+    reply_rx.await.map_err(|_| "Session dropped".to_string())?
+}
+
+#[tauri::command]
+pub async fn get_all_entities(
+    registry: State<'_, Arc<SessionRegistry>>,
+    doc_id: DocId,
+) -> Result<Vec<EntityDto>, String> {
+    let tx = registry.get(&doc_id).await.ok_or("Document not open".to_string())?;
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    tx.send(SessionCommand::GetAllEntities { reply: reply_tx })
+        .await
+        .map_err(|_| "Session closed".to_string())?;
+    reply_rx.await.map_err(|_| "Session dropped".to_string())
+}
+
+#[tauri::command]
+pub async fn get_entity_details(
+    registry: State<'_, Arc<SessionRegistry>>,
+    doc_id: DocId,
+    entity_id: String,
+) -> Result<EntityDetailDto, String> {
+    let tx = registry.get(&doc_id).await.ok_or("Document not open".to_string())?;
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    tx.send(SessionCommand::GetEntityDetails {
+        entity_id,
+        reply: reply_tx,
+    })
+    .await
+    .map_err(|_| "Session closed".to_string())?;
+    reply_rx.await.map_err(|_| "Session dropped".to_string())?
+}
+
+#[tauri::command]
+pub async fn add_triple(
+    registry: State<'_, Arc<SessionRegistry>>,
+    doc_id: DocId,
+    subject_id: String,
+    predicate_iri: String,
+    object_value: String,
+    object_is_entity: bool,
+) -> Result<(), String> {
+    let tx = registry.get(&doc_id).await.ok_or("Document not open".to_string())?;
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    tx.send(SessionCommand::AddTriple {
+        subject_id,
+        predicate_iri,
+        object_value,
+        object_is_entity,
+        reply: reply_tx,
+    })
+    .await
+    .map_err(|_| "Session closed".to_string())?;
+    reply_rx.await.map_err(|_| "Session dropped".to_string())?
+}
+
+#[tauri::command]
+pub async fn check_file_modified(
+    registry: State<'_, Arc<SessionRegistry>>,
+    doc_id: DocId,
+) -> Result<bool, String> {
+    let tx = registry.get(&doc_id).await.ok_or("Document not open".to_string())?;
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    tx.send(SessionCommand::CheckFileModified { reply: reply_tx })
         .await
         .map_err(|_| "Session closed".to_string())?;
     reply_rx.await.map_err(|_| "Session dropped".to_string())?

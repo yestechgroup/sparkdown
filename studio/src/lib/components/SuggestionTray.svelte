@@ -1,11 +1,19 @@
 <script lang="ts">
-  import { getEntities, getSidecarStatus } from '$lib/stores/document.svelte';
+  import { getEntities, getSidecarStatus, getStaleAnchors, getEditorMode } from '$lib/stores/document.svelte';
   import { getActiveDocId } from '$lib/stores/workspace.svelte';
   import { exportDocument } from '$lib/tauri/commands';
 
+  interface Props {
+    onShowRibbon?: () => void;
+  }
+
+  let { onShowRibbon }: Props = $props();
+
   let entities = $derived(getEntities());
   let status = $derived(getSidecarStatus());
+  let staleAnchors = $derived(getStaleAnchors());
   let activeDocId = $derived(getActiveDocId());
+  let editorMode = $derived(getEditorMode());
   let showExportMenu = $state(false);
 
   let statusText = $derived.by(() => {
@@ -16,6 +24,16 @@
     if (stale > 0) parts.push(`${stale} stale`);
     if (detached > 0) parts.push(`${detached} detached`);
     return parts.join(', ');
+  });
+
+  let modeLabel = $derived.by(() => {
+    switch (editorMode) {
+      case 'deep-writing': return 'writing';
+      case 'light-writing': return 'paused';
+      case 'review': return 'review';
+      case 'full-reading': return 'reading';
+      default: return '';
+    }
   });
 
   async function handleExport(format: 'html_rdfa' | 'json_ld' | 'turtle') {
@@ -37,7 +55,16 @@
   <span class="tray-separator">&middot;</span>
   <span class="tray-item">{status.total_triples} triples</span>
 
+  {#if staleAnchors.length > 0 && onShowRibbon}
+    <span class="tray-separator">&middot;</span>
+    <button class="tray-item stale-link" onclick={onShowRibbon}>
+      {staleAnchors.length} stale
+    </button>
+  {/if}
+
   <div class="tray-spacer"></div>
+
+  <span class="mode-indicator">{modeLabel}</span>
 
   {#if activeDocId}
     <div class="export-wrapper">
@@ -75,6 +102,32 @@
 
   .tray-spacer {
     flex: 1;
+  }
+
+  .stale-link {
+    background: none;
+    border: none;
+    color: #F59E0B;
+    cursor: pointer;
+    padding: 0;
+    font-size: var(--font-size-label);
+    font-family: var(--font-ui);
+    text-decoration: underline;
+    text-decoration-color: #F59E0B44;
+  }
+
+  .stale-link:hover {
+    color: #FBBF24;
+  }
+
+  .mode-indicator {
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: #2A2A2A;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
 
   .export-wrapper {

@@ -6,6 +6,7 @@ use crate::types::DocId;
 /// Commands that can be sent to a DocumentSession actor.
 /// Each variant carries a oneshot reply channel where applicable.
 pub enum SessionCommand {
+    // Phase 1
     UpdateSource {
         new_source: String,
         reply: tokio::sync::oneshot::Sender<()>,
@@ -23,6 +24,39 @@ pub enum SessionCommand {
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
     Close,
+
+    // Phase 2
+    CreateEntity {
+        span_start: usize,
+        span_end: usize,
+        type_iri: String,
+        reply: tokio::sync::oneshot::Sender<Result<crate::types::EntityDto, String>>,
+    },
+    UpdateStaleAnchor {
+        entity_id: String,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    DismissSuggestion {
+        entity_id: String,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    GetAllEntities {
+        reply: tokio::sync::oneshot::Sender<Vec<crate::types::EntityDto>>,
+    },
+    GetEntityDetails {
+        entity_id: String,
+        reply: tokio::sync::oneshot::Sender<Result<crate::types::EntityDetailDto, String>>,
+    },
+    AddTriple {
+        subject_id: String,
+        predicate_iri: String,
+        object_value: String,
+        object_is_entity: bool,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    CheckFileModified {
+        reply: tokio::sync::oneshot::Sender<Result<bool, String>>,
+    },
 }
 
 /// Routes commands to the correct DocumentSession by DocId.
