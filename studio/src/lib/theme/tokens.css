@@ -1,0 +1,39 @@
+:root {
+  --bg-app: #0F0F0F;
+  --bg-editor: #1A1A1A;
+  --bg-sidebar: #141414;
+  --bg-tray: #111111;
+
+  --text-primary: #E5E5E5;
+  --text-secondary: #A3A3A3;
+  --text-muted: #737373;
+
+  --border-subtle: #2A2A2A;
+
+  --font-editor: 'JetBrains Mono', 'Berkeley Mono', monospace;
+  --font-ui: 'Inter', -apple-system, sans-serif;
+
+  --font-size-editor: 14px;
+  --font-size-ui: 13px;
+  --font-size-label: 11px;
+
+  --entity-opacity-bg: 0.15;
+  --entity-opacity-underline: 0.20;
+
+  --sidebar-width: 240px;
+  --tray-height: 28px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  overflow: hidden;
+}

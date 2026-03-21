@@ -6,6 +6,7 @@ members = [
     "crates/sparkdown-render",
     "crates/sparkdown-overlay",
     "crates/sparkdown-cli",
+    "studio/src-tauri",
 ]
 
 [workspace.package]
