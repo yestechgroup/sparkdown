@@ -2,14 +2,16 @@
   import '$lib/theme/tokens.css';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import EditorPane from '$lib/components/EditorPane.svelte';
+  import KnowledgePanel from '$lib/components/KnowledgePanel.svelte';
   import { openDocument } from '$lib/tauri/commands';
-  import { setActiveDocId } from '$lib/stores/workspace.svelte';
+  import { getActiveDocId, setActiveDocId } from '$lib/stores/workspace.svelte';
   import { clearDocumentState } from '$lib/stores/document.svelte';
   import { setupEventListeners, teardownEventListeners } from '$lib/stores/events';
   import { onMount } from 'svelte';
   import { readTextFile } from '@tauri-apps/plugin-fs';
 
   let fileContent = $state('');
+  let activeDocId = $derived(getActiveDocId());
 
   onMount(() => {
     setupEventListeners();
@@ -31,6 +33,9 @@
 <div class="app-layout">
   <Sidebar onFileSelect={handleFileSelect} />
   <EditorPane initialContent={fileContent} />
+  {#if activeDocId}
+    <KnowledgePanel />
+  {/if}
 </div>
 
 <style>
