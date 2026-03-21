@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, State};
 
+use crate::pack_types::{TypeCategoryDto, TypeOptionDto};
 use crate::registry::{SessionCommand, SessionRegistry};
 use crate::session::DocumentSession;
-use crate::types::{DocId, EntityDto, FileEntry, RenderFormat, WorkspaceInfo};
+use crate::types::{DocId, DocumentOverviewDto, EntityDetailDto, EntityDto, FileEntry, RenderFormat, WorkspaceInfo};
 
 #[tauri::command]
 pub async fn open_workspace(app: AppHandle) -> Result<WorkspaceInfo, String> {
@@ -133,6 +134,166 @@ pub async fn save_document(
         .await
         .map_err(|_| "Session closed".to_string())?;
     reply_rx.await.map_err(|_| "Session dropped".to_string())?
+}
+
+#[tauri::command]
+pub async fn create_entity(
+    doc_id: String,
+    char_start: usize,
+    char_end: usize,
+    type_iri: String,
+    registry: State<'_, Arc<SessionRegistry>>,
+) -> Result<EntityDto, String> {
+    if char_start >= char_end {
+        return Err("Selection must not be empty".into());
+    }
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let sender = registry
+        .get(&doc_id)
+        .await
+        .ok_or("Document not open".to_string())?;
+    sender
+        .send(SessionCommand::CreateEntity {
+            span_start: char_start,
+            span_end: char_end,
+            type_iri,
+            reply: tx,
+        })
+        .await
+        .map_err(|_| "Session closed".to_string())?;
+    rx.await.map_err(|_| "Session dropped".to_string())?
+}
+
+#[tauri::command]
+pub async fn update_stale_anchor(
+    doc_id: String,
+    entity_id: String,
+    registry: State<'_, Arc<SessionRegistry>>,
+) -> Result<(), String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let sender = registry
+        .get(&doc_id)
+        .await
+        .ok_or("Document not open".to_string())?;
+    sender
+        .send(SessionCommand::UpdateStaleAnchor {
+            entity_id,
+            reply: tx,
+        })
+        .await
+        .map_err(|_| "Session closed".to_string())?;
+    rx.await.map_err(|_| "Session dropped".to_string())?
+}
+
+#[tauri::command]
+pub async fn get_document_overview(
+    doc_id: String,
+    registry: State<'_, Arc<SessionRegistry>>,
+) -> Result<DocumentOverviewDto, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let sender = registry
+        .get(&doc_id)
+        .await
+        .ok_or("Document not open".to_string())?;
+    sender
+        .send(SessionCommand::GetDocumentOverview { reply: tx })
+        .await
+        .map_err(|_| "Session closed".to_string())?;
+    Ok(rx.await.map_err(|_| "Session dropped".to_string())?)
+}
+
+#[tauri::command]
+pub async fn get_entity_detail(
+    doc_id: String,
+    entity_id: String,
+    registry: State<'_, Arc<SessionRegistry>>,
+) -> Result<EntityDetailDto, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let sender = registry
+        .get(&doc_id)
+        .await
+        .ok_or("Document not open".to_string())?;
+    sender
+        .send(SessionCommand::GetEntityDetail {
+            entity_id,
+            reply: tx,
+        })
+        .await
+        .map_err(|_| "Session closed".to_string())?;
+    rx.await.map_err(|_| "Session dropped".to_string())?
+}
+
+#[tauri::command]
+pub async fn delete_entity(
+    doc_id: String,
+    entity_id: String,
+    registry: State<'_, Arc<SessionRegistry>>,
+) -> Result<(), String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let sender = registry
+        .get(&doc_id)
+        .await
+        .ok_or("Document not open".to_string())?;
+    sender
+        .send(SessionCommand::DeleteEntity {
+            entity_id,
+            reply: tx,
+        })
+        .await
+        .map_err(|_| "Session closed".to_string())?;
+    rx.await.map_err(|_| "Session dropped".to_string())?
+}
+
+#[tauri::command]
+pub async fn list_available_types(
+    theme_registry: State<'_, crate::ThemeRegistryState>,
+) -> Result<Vec<TypeCategoryDto>, String> {
+    let reg = theme_registry.read().await;
+    let mut categories = vec![];
+    for (prefix, base_iri, types) in reg.all_type_categories() {
+        let type_options: Vec<TypeOptionDto> = types
+            .into_iter()
+            .map(|(curie, _local, tdef)| TypeOptionDto {
+                iri: tdef.iri.as_str().to_string(),
+                curie,
+                label: tdef.label.clone(),
+                description: tdef.comment.clone(),
+            })
+            .collect();
+        categories.push(TypeCategoryDto {
+            pack_name: prefix,
+            category_label: base_iri,
+            types: type_options,
+        });
+    }
+    Ok(categories)
+}
+
+#[tauri::command]
+pub async fn search_types(
+    query: String,
+    limit: Option<usize>,
+    theme_registry: State<'_, crate::ThemeRegistryState>,
+) -> Result<Vec<TypeOptionDto>, String> {
+    let reg = theme_registry.read().await;
+    let results = reg.search_types(&query, limit.unwrap_or(50));
+    Ok(results
+        .into_iter()
+        .map(|(prefix, tdef)| {
+            let local = tdef
+                .iri
+                .as_str()
+                .rsplit('/')
+                .next()
+                .unwrap_or(tdef.iri.as_str());
+            TypeOptionDto {
+                iri: tdef.iri.as_str().to_string(),
+                curie: format!("{prefix}:{local}"),
+                label: tdef.label.clone(),
+                description: tdef.comment.clone(),
+            }
+        })
+        .collect())
 }
 
 /// Recursively scan a directory for .md files.

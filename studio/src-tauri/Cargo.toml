@@ -12,6 +12,7 @@ sparkdown-core = { path = "../../crates/sparkdown-core" }
 sparkdown-overlay = { path = "../../crates/sparkdown-overlay" }
 sparkdown-render = { path = "../../crates/sparkdown-render" }
 sparkdown-ontology = { path = "../../crates/sparkdown-ontology" }
+oxrdf = { workspace = true }
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
