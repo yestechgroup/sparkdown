@@ -22,4 +22,4 @@ thiserror = "2"
 sha2 = "0.10"
 
 [build-dependencies]
-tauri-build = { version = "2" }
+tauri-build = { version = "2", features = [] }
