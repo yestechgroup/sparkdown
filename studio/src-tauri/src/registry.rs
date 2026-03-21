@@ -23,6 +23,28 @@ pub enum SessionCommand {
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
     Close,
+    // Phase 1.5: Entity creation and management
+    CreateEntity {
+        span_start: usize,
+        span_end: usize,
+        type_iri: String,
+        reply: tokio::sync::oneshot::Sender<Result<crate::types::EntityDto, String>>,
+    },
+    UpdateStaleAnchor {
+        entity_id: String,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    GetDocumentOverview {
+        reply: tokio::sync::oneshot::Sender<crate::types::DocumentOverviewDto>,
+    },
+    GetEntityDetail {
+        entity_id: String,
+        reply: tokio::sync::oneshot::Sender<Result<crate::types::EntityDetailDto, String>>,
+    },
+    DeleteEntity {
+        entity_id: String,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
 }
 
 /// Routes commands to the correct DocumentSession by DocId.
