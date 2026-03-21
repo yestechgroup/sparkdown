@@ -293,13 +293,21 @@ members = [
 ]
 ```
 
-- [ ] **Step 4: Install frontend dependencies and verify build**
+- [ ] **Step 4: Install frontend dependencies, generate icons, and verify build**
 
 Run from `studio/`:
 
 ```bash
 cd studio && pnpm install
 ```
+
+Generate default Tauri app icons (creates `studio/src-tauri/icons/`):
+
+```bash
+cd studio && pnpm tauri icon --output src-tauri/icons
+```
+
+If `pnpm tauri icon` is not available, create the `studio/src-tauri/icons/` directory manually and add a placeholder `icon.png` (32x32 minimum). Tauri requires icons at build time.
 
 Run from project root:
 
@@ -1102,9 +1110,11 @@ fn sidecar_path_for(md_path: &Path) -> PathBuf {
 /// Convert a full IRI to a CURIE-like display string.
 /// e.g. "http://schema.org/Person" -> "schema:Person"
 fn iri_to_curie(iri: &str) -> String {
+    // Use the graph's prefix map for resolution when available.
+    // Fallback to known prefixes for standalone use.
     let known = [
         ("http://schema.org/", "schema:"),
-        ("http://purl.org/dc/elements/1.1/", "dc:"),
+        ("http://purl.org/dc/terms/", "dc:"),
         ("http://xmlns.com/foaf/0.1/", "foaf:"),
     ];
     for (base, prefix) in &known {
@@ -1206,12 +1216,14 @@ use crate::types::{DocId, EntityDto, FileEntry, RenderFormat, WorkspaceInfo};
 pub async fn open_workspace(app: AppHandle) -> Result<WorkspaceInfo, String> {
     use tauri_plugin_dialog::DialogExt;
 
-    let folder = app
-        .dialog()
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
         .file()
-        .blocking_pick_folder();
+        .pick_folder(move |folder| {
+            let _ = tx.send(folder);
+        });
 
-    let folder = folder.ok_or("No folder selected")?;
+    let folder = rx.await.map_err(|_| "Dialog cancelled")?.ok_or("No folder selected")?;
     let path = folder.to_string();
 
     let files = scan_workspace_files(&path).await?;
@@ -2510,29 +2522,134 @@ function escapeHtml(s: string): string {
 
 - [ ] **Step 4: Wire extensions into CodeMirrorEditor**
 
-Update `studio/src/lib/components/CodeMirrorEditor.svelte` to include the semantic extensions and react to entity updates:
+Replace `studio/src/lib/components/CodeMirrorEditor.svelte` with the full updated version:
 
-Add imports at top of `<script>`:
-```typescript
-import { entitiesField, setEntitiesEffect, semanticGutter } from '$lib/editor/semantic-gutter';
-import { entityDecorations } from '$lib/editor/entity-decorations';
-import { whisperTooltip } from '$lib/editor/whisper-tooltip';
-import { getEntities } from '$lib/stores/document.svelte';
-```
+```svelte
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { EditorState } from '@codemirror/state';
+  import { EditorView, keymap } from '@codemirror/view';
+  import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+  import { markdown } from '@codemirror/lang-markdown';
+  import { oneDark } from '@codemirror/theme-one-dark';
+  import { updateSource, saveDocument } from '$lib/tauri/commands';
+  import { getActiveDocId } from '$lib/stores/workspace.svelte';
+  import { getEntities } from '$lib/stores/document.svelte';
+  import { entitiesField, setEntitiesEffect, semanticGutter } from '$lib/editor/semantic-gutter';
+  import { entityDecorations } from '$lib/editor/entity-decorations';
+  import { whisperTooltip } from '$lib/editor/whisper-tooltip';
 
-Add `entitiesField`, `semanticGutter`, `entityDecorations`, and `whisperTooltip` to the `extensions` array in `EditorState.create()`.
-
-Add an `$effect` to push entity updates into the editor:
-
-```typescript
-$effect(() => {
-  const current = getEntities();
-  if (view) {
-    view.dispatch({
-      effects: setEntitiesEffect.of(current),
-    });
+  interface Props {
+    initialContent?: string;
   }
-});
+
+  let { initialContent = '' }: Props = $props();
+  let editorContainer: HTMLDivElement;
+  let view: EditorView;
+  let debounceTimer: ReturnType<typeof setTimeout>;
+
+  // Push entity updates from Svelte state into CodeMirror
+  $effect(() => {
+    const current = getEntities();
+    if (view) {
+      view.dispatch({
+        effects: setEntitiesEffect.of(current),
+      });
+    }
+  });
+
+  onMount(() => {
+    const state = EditorState.create({
+      doc: initialContent,
+      extensions: [
+        keymap.of([
+          ...defaultKeymap,
+          ...historyKeymap,
+          {
+            key: 'Mod-s',
+            run: () => {
+              const docId = getActiveDocId();
+              if (docId) {
+                saveDocument(docId).catch(console.error);
+              }
+              return true;
+            },
+          },
+        ]),
+        history(),
+        markdown(),
+        oneDark,
+        entitiesField,
+        semanticGutter,
+        entityDecorations,
+        whisperTooltip,
+        EditorView.theme({
+          '&': {
+            height: '100%',
+            fontSize: 'var(--font-size-editor)',
+            fontFamily: 'var(--font-editor)',
+          },
+          '.cm-content': {
+            padding: '16px',
+          },
+          '.cm-scroller': {
+            overflow: 'auto',
+          },
+          '.cm-semantic-gutter': {
+            width: '12px',
+          },
+        }),
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+              const docId = getActiveDocId();
+              if (docId) {
+                const source = update.state.doc.toString();
+                updateSource(docId, source).catch(console.error);
+              }
+            }, 150);
+          }
+        }),
+      ],
+    });
+
+    view = new EditorView({
+      state,
+      parent: editorContainer,
+    });
+
+    return () => {
+      clearTimeout(debounceTimer);
+      view.destroy();
+    };
+  });
+
+  export function setContent(content: string) {
+    if (view) {
+      view.dispatch({
+        changes: {
+          from: 0,
+          to: view.state.doc.length,
+          insert: content,
+        },
+      });
+    }
+  }
+</script>
+
+<div class="editor-wrapper" bind:this={editorContainer}></div>
+
+<style>
+  .editor-wrapper {
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .editor-wrapper :global(.cm-editor) {
+    height: 100%;
+  }
+</style>
 ```
 
 - [ ] **Step 5: Verify semantic overlays work**
@@ -2585,23 +2702,33 @@ import { saveDocument } from '$lib/tauri/commands';
 
 - [ ] **Step 2: Add export menu to suggestion tray**
 
-Update `SuggestionTray.svelte` to include an export button:
+Replace `studio/src/lib/components/SuggestionTray.svelte` with the full updated version:
 
 ```svelte
 <script lang="ts">
+  import { getEntities, getSidecarStatus } from '$lib/stores/document.svelte';
   import { getActiveDocId } from '$lib/stores/workspace.svelte';
   import { exportDocument } from '$lib/tauri/commands';
 
-  // ... existing code ...
-
+  let entities = $derived(getEntities());
+  let status = $derived(getSidecarStatus());
   let activeDocId = $derived(getActiveDocId());
   let showExportMenu = $state(false);
+
+  let statusText = $derived.by(() => {
+    const stale = status.stale;
+    const detached = status.detached;
+    if (stale === 0 && detached === 0) return 'synced';
+    const parts: string[] = [];
+    if (stale > 0) parts.push(`${stale} stale`);
+    if (detached > 0) parts.push(`${detached} detached`);
+    return parts.join(', ');
+  });
 
   async function handleExport(format: 'html_rdfa' | 'json_ld' | 'turtle') {
     if (!activeDocId) return;
     try {
       const result = await exportDocument(activeDocId, format);
-      // For now, log to console — file save dialog comes later
       console.log(`Exported ${format}:`, result.substring(0, 200));
     } catch (e) {
       console.error('Export failed:', e);
@@ -2609,9 +2736,105 @@ Update `SuggestionTray.svelte` to include an export button:
     showExportMenu = false;
   }
 </script>
-```
 
-Add export button and dropdown to the tray markup.
+<div class="suggestion-tray">
+  <span class="tray-item">{entities.length} entities</span>
+  <span class="tray-separator">&middot;</span>
+  <span class="tray-item">sidecar: {statusText}</span>
+  <span class="tray-separator">&middot;</span>
+  <span class="tray-item">{status.total_triples} triples</span>
+
+  <div class="tray-spacer"></div>
+
+  {#if activeDocId}
+    <div class="export-wrapper">
+      <button class="tray-button" onclick={() => showExportMenu = !showExportMenu}>
+        Export
+      </button>
+      {#if showExportMenu}
+        <div class="export-menu">
+          <button onclick={() => handleExport('html_rdfa')}>HTML+RDFa</button>
+          <button onclick={() => handleExport('json_ld')}>JSON-LD</button>
+          <button onclick={() => handleExport('turtle')}>Turtle</button>
+        </div>
+      {/if}
+    </div>
+  {/if}
+</div>
+
+<style>
+  .suggestion-tray {
+    height: var(--tray-height);
+    background: var(--bg-tray);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 8px;
+    font-size: var(--font-size-label);
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .tray-separator {
+    opacity: 0.4;
+  }
+
+  .tray-spacer {
+    flex: 1;
+  }
+
+  .export-wrapper {
+    position: relative;
+  }
+
+  .tray-button {
+    background: none;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    padding: 1px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: var(--font-size-label);
+    font-family: var(--font-ui);
+  }
+
+  .tray-button:hover {
+    color: var(--text-secondary);
+    border-color: var(--text-muted);
+  }
+
+  .export-menu {
+    position: absolute;
+    bottom: 100%;
+    right: 0;
+    background: #1E1E1E;
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    padding: 4px 0;
+    margin-bottom: 4px;
+    min-width: 120px;
+  }
+
+  .export-menu button {
+    display: block;
+    width: 100%;
+    padding: 4px 12px;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    font-size: var(--font-size-label);
+    font-family: var(--font-ui);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .export-menu button:hover {
+    background: var(--border-subtle);
+    color: var(--text-primary);
+  }
+</style>
+```
 
 - [ ] **Step 3: Verify save and export**
 
