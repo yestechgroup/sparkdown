@@ -76,6 +76,36 @@ pub fn byte_to_char_offset(source: &str, byte_offset: usize) -> usize {
     source[..byte_offset].encode_utf16().count()
 }
 
+/// Maps UTF-16 character offset (CodeMirror) to byte offset in the source string.
+pub fn char_to_byte_offset(source: &str, char_offset: usize) -> usize {
+    let mut byte_pos = 0;
+    let mut char_count = 0;
+    for ch in source.chars() {
+        if char_count >= char_offset {
+            break;
+        }
+        char_count += ch.len_utf16();
+        byte_pos += ch.len_utf8();
+    }
+    byte_pos
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentOverviewDto {
+    pub title: Option<String>,
+    pub entities: Vec<EntityDto>,
+    pub sidecar_status: SidecarStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityDetailDto {
+    pub entity: EntityDto,
+    pub all_relations: Vec<Relation>,
+    pub incoming_relations: Vec<Relation>,
+    pub anchor_snippet: String,
+    pub anchor_line: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,6 +143,29 @@ mod tests {
         let s = "caf\u{00e9}!"; // é is 2 bytes in UTF-8, 1 UTF-16 code unit
         assert_eq!(byte_to_char_offset(s, 3), 3); // "caf" = 3 bytes, 3 chars
         assert_eq!(byte_to_char_offset(s, 5), 4); // "café" = 5 bytes, 4 chars
+    }
+
+    #[test]
+    fn char_to_byte_offset_ascii() {
+        let source = "Hello, World!";
+        assert_eq!(char_to_byte_offset(source, 0), 0);
+        assert_eq!(char_to_byte_offset(source, 5), 5);
+        assert_eq!(char_to_byte_offset(source, 13), 13);
+    }
+
+    #[test]
+    fn char_to_byte_offset_multibyte() {
+        let source = "caf\u{00e9}"; // é is 2 bytes UTF-8, 1 code unit UTF-16
+        assert_eq!(char_to_byte_offset(source, 0), 0);
+        assert_eq!(char_to_byte_offset(source, 3), 3); // 'f' is at byte 3
+        assert_eq!(char_to_byte_offset(source, 4), 5); // é is 2 bytes
+    }
+
+    #[test]
+    fn char_to_byte_offset_emoji() {
+        let source = "hi \u{1F44B} there"; // 👋 is 4 bytes UTF-8, 2 code units UTF-16
+        assert_eq!(char_to_byte_offset(source, 3), 3); // start of emoji
+        assert_eq!(char_to_byte_offset(source, 5), 7); // after emoji (2 UTF-16 units)
     }
 
     #[test]

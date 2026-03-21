@@ -1,5 +1,6 @@
 mod commands;
 mod events;
+mod pack_types;
 mod registry;
 mod session;
 mod types;
