@@ -166,6 +166,51 @@ impl ThemeRegistry {
             .map(|p| (p.prefix(), p.base_iri()))
             .collect()
     }
+
+    /// Returns all type categories across all registered providers,
+    /// structured for UI consumption.
+    /// Returns (prefix, base_iri, Vec<(curie, local_name, &TypeDef)>) per provider.
+    pub fn all_type_categories(&self) -> Vec<(String, String, Vec<(String, String, &TypeDef)>)> {
+        self.providers
+            .iter()
+            .map(|(prefix, provider)| {
+                let types: Vec<_> = provider
+                    .all_types()
+                    .into_iter()
+                    .map(|t| {
+                        let local = t
+                            .iri
+                            .as_str()
+                            .strip_prefix(provider.base_iri())
+                            .unwrap_or(t.iri.as_str())
+                            .to_string();
+                        let curie = format!("{}:{}", prefix, local);
+                        (curie, local, t)
+                    })
+                    .collect();
+                (prefix.clone(), provider.base_iri().to_string(), types)
+            })
+            .collect()
+    }
+
+    /// Search types by query string across all providers. Returns up to `limit` results.
+    pub fn search_types(&self, query: &str, limit: usize) -> Vec<(&str, &TypeDef)> {
+        let query_lower = query.to_lowercase();
+        let mut results = vec![];
+        for (prefix, provider) in &self.providers {
+            for t in provider.all_types() {
+                if results.len() >= limit {
+                    return results;
+                }
+                if t.label.to_lowercase().contains(&query_lower)
+                    || t.iri.as_str().to_lowercase().contains(&query_lower)
+                {
+                    results.push((prefix.as_str(), t));
+                }
+            }
+        }
+        results
+    }
 }
 
 #[cfg(test)]
