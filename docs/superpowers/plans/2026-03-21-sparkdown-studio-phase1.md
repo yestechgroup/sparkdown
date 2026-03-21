@@ -1141,7 +1141,7 @@ mod tests {
     fn iri_to_curie_known_prefix() {
         assert_eq!(iri_to_curie("http://schema.org/Person"), "schema:Person");
         assert_eq!(
-            iri_to_curie("http://purl.org/dc/elements/1.1/title"),
+            iri_to_curie("http://purl.org/dc/terms/title"),
             "dc:title"
         );
     }
