@@ -93,6 +93,37 @@ sparkdown overlay export doc.md
 sparkdown overlay import doc.md
 ```
 
+## Sparkdown Studio
+
+Sparkdown Studio is a visual semantic editing desktop application built with [Tauri 2](https://tauri.app/) (Rust backend) and [Svelte 5](https://svelte.dev/) (frontend). It provides a CodeMirror 6 markdown editor with semantic gutter annotations, entity decorations, and overlay sync — all powered by the core Sparkdown crates.
+
+### Prerequisites
+
+- [Rust](https://www.rust-lang.org/tools/install) (edition 2024)
+- [Node.js](https://nodejs.org/) (LTS recommended)
+- [pnpm](https://pnpm.io/)
+- [Tauri 2 system dependencies](https://v2.tauri.app/start/prerequisites/) (platform-specific — see Tauri docs)
+
+### Running in Dev Mode
+
+```bash
+cd studio
+pnpm install          # install frontend dependencies
+cargo tauri dev       # start the dev server and desktop app
+```
+
+`cargo tauri dev` will:
+1. Start the Vite dev server on `http://localhost:1420` with hot reload
+2. Build the Rust backend (which depends on all five Sparkdown crates)
+3. Launch the Tauri desktop window connected to the dev server
+
+You can also run the frontend alone for UI work:
+
+```bash
+cd studio
+pnpm dev              # Vite dev server only, at http://localhost:1420
+```
+
 ## Technologies
 
 - **Rust** (2024 edition) — core language
@@ -102,6 +133,10 @@ sparkdown overlay import doc.md
 - **serde / serde_json / serde_yaml_ng** — serialization
 - **similar** — diffing for overlay sync
 - **thiserror / anyhow** — error handling
+- **Tauri 2** — cross-platform desktop framework (Studio)
+- **Svelte 5** — reactive frontend framework (Studio)
+- **Vite** — frontend dev server and build tool (Studio)
+- **CodeMirror 6** — extensible code editor (Studio)
 
 ## License
 
