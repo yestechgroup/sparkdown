@@ -32,16 +32,13 @@
 		"vitest-browser-svelte": "^2.0.2"
 	},
 	"dependencies": {
-		"@blocksuite/block-std": "0.19.5",
-		"@blocksuite/blocks": "0.19.5",
-		"@blocksuite/presets": "0.19.5",
-		"@blocksuite/store": "0.19.5",
+		"@tiptap/core": "^2.11.0",
+		"@tiptap/extension-collaboration": "^2.11.0",
+		"@tiptap/extension-collaboration-cursor": "^2.11.0",
+		"@tiptap/pm": "^2.11.0",
+		"@tiptap/starter-kit": "^2.11.0",
+		"y-prosemirror": "^1.2.0",
 		"y-websocket": "^3.0.0",
 		"yjs": "^13.6.30"
-	},
-	"pnpm": {
-		"overrides": {
-			"@blocksuite/icons": "2.1.75"
-		}
 	}
 }

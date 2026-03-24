@@ -1,31 +1,51 @@
-import { effects as blocksEffects } from '@blocksuite/blocks/effects';
-import { effects as presetsEffects } from '@blocksuite/presets/effects';
-blocksEffects();
-presetsEffects();
+import { Editor } from '@tiptap/core';
+import StarterKit from '@tiptap/starter-kit';
+import Collaboration from '@tiptap/extension-collaboration';
+import * as Y from 'yjs';
+import { WebsocketProvider } from 'y-websocket';
+import { AgentNote } from './extensions/agent-note';
 
-import { AffineEditorContainer, createEmptyDoc } from '@blocksuite/presets';
-import { Text } from '@blocksuite/store';
+const SYNC_URL = 'ws://localhost:4444';
+const ROOM_NAME = 'sparkdown-poc';
 
 export interface EditorInstance {
-  doc: ReturnType<ReturnType<typeof createEmptyDoc>['init']>;
-  editor: AffineEditorContainer;
+  editor: Editor;
+  ydoc: Y.Doc;
+  provider: WebsocketProvider;
+  destroy: () => void;
 }
 
-export function createEditor(container: HTMLElement): EditorInstance {
-  // createEmptyDoc sets up Schema + DocCollection + Doc + default block tree
-  const doc = createEmptyDoc().init();
+export function createEditor(element: HTMLElement): EditorInstance {
+  const ydoc = new Y.Doc();
 
-  // AffineEditorContainer wraps PageEditor with the viewport element
-  // that BlockSuite components require for scroll/position tracking
-  const editor = new AffineEditorContainer();
-  editor.doc = doc;
-  container.appendChild(editor);
+  const provider = new WebsocketProvider(SYNC_URL, ROOM_NAME, ydoc, {
+    connect: true,
+  });
 
-  // Set initial placeholder text
-  const paragraphs = doc.getBlockByFlavour('affine:paragraph');
-  if (paragraphs.length > 0) {
-    doc.updateBlock(paragraphs[0], { text: new Text('Start writing here...') });
-  }
+  const editor = new Editor({
+    element,
+    extensions: [
+      StarterKit.configure({
+        // Disable history — collaboration provides its own undo manager
+        history: false,
+      }),
+      Collaboration.configure({
+        document: ydoc,
+      }),
+      AgentNote,
+    ],
+    editorProps: {
+      attributes: {
+        class: 'tiptap-editor',
+      },
+    },
+  });
 
-  return { doc, editor };
+  const destroy = () => {
+    editor.destroy();
+    provider.disconnect();
+    ydoc.destroy();
+  };
+
+  return { editor, ydoc, provider, destroy };
 }

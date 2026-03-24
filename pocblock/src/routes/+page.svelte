@@ -2,32 +2,16 @@
   import { onMount, onDestroy } from 'svelte';
   import type { EditorInstance } from '$lib/editor';
 
-  let container: HTMLElement;
-  let editorInstance: EditorInstance | null = null;
+  let editorEl: HTMLElement;
+  let instance: EditorInstance | null = null;
   let syncStatus = $state('connecting...');
   let agentStatus = $state('idle');
 
   onMount(async () => {
-    // Dynamic import — BlockSuite needs the DOM
     const { createEditor } = await import('$lib/editor');
-    editorInstance = createEditor(container);
+    instance = createEditor(editorEl);
 
-    // Create the sync provider but don't connect yet — the WebSocket must
-    // not deliver Yjs updates until the full Lit component tree is mounted.
-    const { createSyncProvider } = await import('$lib/sync');
-    const provider = createSyncProvider(editorInstance.doc);
-
-    // Wait for the full editor tree: container → editor-host → block components.
-    // Each level is a separate Lit element with its own update cycle.
-    await editorInstance.editor.updateComplete;
-    const host = editorInstance.editor.host;
-    if (host) await host.updateComplete;
-
-    // Now it's safe to open the WebSocket
-    provider.connect();
-
-    // Update status indicator
-    provider.on('status', (e: { status: string }) => {
+    instance.provider.on('status', (e: { status: string }) => {
       syncStatus = e.status === 'connected' ? 'connected' : 'disconnected';
     });
 
@@ -45,7 +29,8 @@
   });
 
   onDestroy(() => {
-    editorInstance = null;
+    instance?.destroy();
+    instance = null;
   });
 </script>
 
@@ -61,7 +46,7 @@
       </span>
     </div>
   </header>
-  <main bind:this={container} class="editor-container"></main>
+  <main bind:this={editorEl} class="editor-container"></main>
 </div>
 
 <style>
@@ -102,5 +87,55 @@
 
   .editor-container {
     min-height: 80vh;
+  }
+
+  /* Tiptap editor styling */
+  :global(.tiptap-editor) {
+    outline: none;
+    padding: 1rem;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+
+  :global(.tiptap-editor p) {
+    margin: 0.5em 0;
+  }
+
+  :global(.tiptap-editor h1) {
+    font-size: 1.8em;
+    margin-top: 1em;
+  }
+
+  :global(.tiptap-editor h2) {
+    font-size: 1.4em;
+    margin-top: 0.8em;
+  }
+
+  :global(.tiptap-editor h3) {
+    font-size: 1.2em;
+    margin-top: 0.6em;
+  }
+
+  :global(.tiptap-editor code) {
+    background: #f0f0f0;
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-size: 0.9em;
+  }
+
+  :global(.tiptap-editor pre) {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 1em;
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+
+  :global(.tiptap-editor blockquote) {
+    border-left: 3px solid #ccc;
+    padding-left: 1em;
+    color: #666;
+    margin: 0.5em 0;
   }
 </style>

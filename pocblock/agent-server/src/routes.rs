@@ -76,9 +76,11 @@ pub async fn handle_doc_update<
         if let Ok(entities) = entities {
             for entity in entities {
                 if entity.confidence >= state.config.confidence_threshold {
+                    // Use the node index from the entity's block_id field
+                    let node_idx = entity.block_id.parse::<usize>().ok();
                     if doc_writer::insert_agent_note(
                         &doc,
-                        Some(&entity.block_id),
+                        node_idx,
                         "entity-detector",
                         "Entity Detector",
                         "entity",
@@ -99,7 +101,7 @@ pub async fn handle_doc_update<
         if let Ok(Some(summary)) = summary {
             if doc_writer::insert_agent_note(
                 &doc,
-                doc_view.last_content_block_id(),
+                doc_view.last_content_node_index(),
                 "summarizer",
                 "Summarizer",
                 "summary",
@@ -114,9 +116,10 @@ pub async fn handle_doc_update<
 
         if let Ok(questions) = questions {
             for question in questions {
+                let node_idx = question.source_block_id.parse::<usize>().ok();
                 if doc_writer::insert_agent_note(
                     &doc,
-                    Some(&question.source_block_id),
+                    node_idx,
                     "question-gen",
                     "Question Generator",
                     "question",

@@ -7,12 +7,10 @@ export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 	optimizeDeps: {
 		include: [
-			'@blocksuite/presets',
-			'@blocksuite/blocks',
-			'@blocksuite/store',
-			'@blocksuite/block-std',
-			'@blocksuite/blocks/effects',
-			'@blocksuite/presets/effects',
+			'@tiptap/core',
+			'@tiptap/starter-kit',
+			'@tiptap/extension-collaboration',
+			'y-prosemirror',
 		],
 	},
 	test: {
