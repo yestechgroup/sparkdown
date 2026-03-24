@@ -85,15 +85,11 @@ function handleConnection(ws, roomName) {
 
           if (syncType === 0) {
             // SyncStep1: client sends state vector, we reply with SyncStep2 (missing updates)
+            // encodeStateAsUpdate takes raw encoded sv bytes (or undefined for full state)
             const svBytes = decoding.readVarUint8Array(decoder);
-            let sv;
-            if (svBytes.length === 0) {
-              // Empty state vector = client has nothing, send full state
-              sv = new Uint8Array([0]); // encoded empty state vector (0 entries)
-            } else {
-              sv = svBytes;
-            }
-            const update = Y.encodeStateAsUpdate(room.doc, Y.decodeStateVector(sv));
+            const update = svBytes.length > 0
+              ? Y.encodeStateAsUpdate(room.doc, svBytes)
+              : Y.encodeStateAsUpdate(room.doc);
             const encoder = encoding.createEncoder();
             encoding.writeVarUint(encoder, MSG_SYNC);
             encoding.writeVarUint(encoder, 1); // SyncStep2
