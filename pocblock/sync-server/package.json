@@ -5,6 +5,6 @@
     "start": "bash start.sh"
   },
   "dependencies": {
-    "y-websocket": "^2"
+    "@y/websocket-server": "^0.1.5"
   }
 }
