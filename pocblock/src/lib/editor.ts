@@ -1,24 +1,28 @@
-import type { Doc } from '@blocksuite/store';
-import { AffineEditorContainer, createEmptyDoc } from '@blocksuite/presets';
-import { effects as presetEffects } from '@blocksuite/presets/effects';
+import { effects } from '@blocksuite/presets/effects';
+effects();
 
-// Register all web components (must be called once)
-presetEffects();
+import { createEmptyDoc, PageEditor } from '@blocksuite/presets';
+import { Text } from '@blocksuite/store';
 
 export interface EditorInstance {
-  doc: Doc;
-  editor: AffineEditorContainer;
+  doc: ReturnType<ReturnType<typeof createEmptyDoc>['init']>;
+  editor: PageEditor;
 }
 
 export function createEditor(container: HTMLElement): EditorInstance {
-  // Use the built-in helper which handles Schema, DocCollection, etc.
-  const { doc, init } = createEmptyDoc();
-  init();
+  // createEmptyDoc sets up Schema + DocCollection + Doc + default block tree
+  const doc = createEmptyDoc().init();
 
-  // Create the editor web component
-  const editor = new AffineEditorContainer();
+  // Create the page editor web component and mount it
+  const editor = new PageEditor();
   editor.doc = doc;
   container.appendChild(editor);
+
+  // Set initial placeholder text
+  const paragraphs = doc.getBlockByFlavour('affine:paragraph');
+  if (paragraphs.length > 0) {
+    doc.updateBlock(paragraphs[0], { text: new Text('Start writing here...') });
+  }
 
   return { doc, editor };
 }

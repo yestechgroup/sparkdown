@@ -5,6 +5,16 @@ import { sveltekit } from '@sveltejs/kit/vite';
 
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
+	optimizeDeps: {
+		include: [
+			'@blocksuite/presets',
+			'@blocksuite/blocks',
+			'@blocksuite/store',
+			'@blocksuite/block-std',
+			'@blocksuite/blocks/effects',
+			'@blocksuite/presets/effects',
+		],
+	},
 	test: {
 		expect: { requireAssertions: true },
 		projects: [
