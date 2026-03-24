@@ -13,6 +13,11 @@
     const { connectSync } = await import('$lib/sync');
 
     editorInstance = createEditor(container);
+
+    // Wait for the editor to finish its initial Lit render before connecting
+    // Yjs sync — otherwise incoming updates trigger connectedCallback on
+    // block components whose host isn't initialised yet.
+    await editorInstance.editor.updateComplete;
     const provider = connectSync(editorInstance.doc);
 
     // Update status indicator
