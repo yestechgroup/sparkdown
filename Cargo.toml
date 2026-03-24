@@ -8,6 +8,9 @@ members = [
     "crates/sparkdown-cli",
     "studio/src-tauri",
 ]
+exclude = [
+    "pocblock/agent-server",
+]
 
 [workspace.package]
 version = "0.1.0"
