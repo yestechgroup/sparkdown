@@ -1,4 +1,5 @@
-import '@blocksuite/presets/effects';
+import { effects } from '@blocksuite/presets/effects';
+effects();
 
 import { createEmptyDoc, PageEditor } from '@blocksuite/presets';
 import { Text } from '@blocksuite/store';

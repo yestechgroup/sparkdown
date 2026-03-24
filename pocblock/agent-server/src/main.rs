@@ -54,11 +54,15 @@ async fn main() -> anyhow::Result<()> {
         last_text_hash: Mutex::new(0),
     });
 
+    // CORS layer — allow browser requests from the frontend dev server
+    let cors = tower_http::cors::CorsLayer::permissive();
+
     // Routes
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/on-doc-update", post(routes::handle_doc_update))
         .route("/run-agents", post(routes::run_agents_manually))
+        .layer(cors)
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", config.agent_port);
