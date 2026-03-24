@@ -10,15 +10,21 @@
   onMount(async () => {
     // Dynamic import — BlockSuite needs the DOM
     const { createEditor } = await import('$lib/editor');
-    const { connectSync } = await import('$lib/sync');
-
     editorInstance = createEditor(container);
 
-    // Wait for the editor to finish its initial Lit render before connecting
-    // Yjs sync — otherwise incoming updates trigger connectedCallback on
-    // block components whose host isn't initialised yet.
+    // Create the sync provider but don't connect yet — the WebSocket must
+    // not deliver Yjs updates until the full Lit component tree is mounted.
+    const { createSyncProvider } = await import('$lib/sync');
+    const provider = createSyncProvider(editorInstance.doc);
+
+    // Wait for the full editor tree: container → editor-host → block components.
+    // Each level is a separate Lit element with its own update cycle.
     await editorInstance.editor.updateComplete;
-    const provider = connectSync(editorInstance.doc);
+    const host = editorInstance.editor.host;
+    if (host) await host.updateComplete;
+
+    // Now it's safe to open the WebSocket
+    provider.connect();
 
     // Update status indicator
     provider.on('status', (e: { status: string }) => {
