@@ -1,7 +1,6 @@
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import * as Y from 'yjs';
-import * as syncProtocol from 'y-protocols/sync';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
@@ -48,11 +47,12 @@ function handleConnection(ws, roomName) {
   room.conns.add(ws);
   console.log(`Client joined "${roomName}" (${room.conns.size} total)`);
 
-  // Send initial sync step 1
+  // Send initial sync step 1 (our state vector)
   {
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, MSG_SYNC);
-    syncProtocol.writeSyncStep1(encoder, room.doc);
+    encoding.writeVarUint(encoder, 0); // SyncStep1
+    encoding.writeVarUint8Array(encoder, Y.encodeStateVector(room.doc));
     ws.send(encoding.toUint8Array(encoder));
   }
 
@@ -81,14 +81,36 @@ function handleConnection(ws, roomName) {
 
       switch (msgType) {
         case MSG_SYNC: {
-          const encoder = encoding.createEncoder();
-          encoding.writeVarUint(encoder, MSG_SYNC);
-          syncProtocol.readSyncMessage(decoder, encoder, room.doc, ws);
-          const reply = encoding.toUint8Array(encoder);
-          // If there's a reply (SyncStep2 or update), send it back
-          if (encoding.length(encoder) > 1) {
-            ws.send(reply);
+          const syncType = decoding.readVarUint(decoder);
+
+          if (syncType === 0) {
+            // SyncStep1: client sends state vector, we reply with SyncStep2 (missing updates)
+            const svBytes = decoding.readVarUint8Array(decoder);
+            let sv;
+            if (svBytes.length === 0) {
+              // Empty state vector = client has nothing, send full state
+              sv = new Uint8Array([0]); // encoded empty state vector (0 entries)
+            } else {
+              sv = svBytes;
+            }
+            const update = Y.encodeStateAsUpdate(room.doc, Y.decodeStateVector(sv));
+            const encoder = encoding.createEncoder();
+            encoding.writeVarUint(encoder, MSG_SYNC);
+            encoding.writeVarUint(encoder, 1); // SyncStep2
+            encoding.writeVarUint8Array(encoder, update);
+            ws.send(encoding.toUint8Array(encoder));
+
+          } else if (syncType === 1) {
+            // SyncStep2: client sends missing updates, apply them
+            const update = decoding.readVarUint8Array(decoder);
+            Y.applyUpdate(room.doc, update);
+
+          } else if (syncType === 2) {
+            // Update: incremental update, apply and broadcast
+            const update = decoding.readVarUint8Array(decoder);
+            Y.applyUpdate(room.doc, update);
           }
+
           // Broadcast the raw message to other clients
           for (const conn of room.conns) {
             if (conn !== ws && conn.readyState === 1) {
