@@ -3,20 +3,21 @@ import { effects as presetsEffects } from '@blocksuite/presets/effects';
 blocksEffects();
 presetsEffects();
 
-import { createEmptyDoc, PageEditor } from '@blocksuite/presets';
+import { AffineEditorContainer, createEmptyDoc } from '@blocksuite/presets';
 import { Text } from '@blocksuite/store';
 
 export interface EditorInstance {
   doc: ReturnType<ReturnType<typeof createEmptyDoc>['init']>;
-  editor: PageEditor;
+  editor: AffineEditorContainer;
 }
 
 export function createEditor(container: HTMLElement): EditorInstance {
   // createEmptyDoc sets up Schema + DocCollection + Doc + default block tree
   const doc = createEmptyDoc().init();
 
-  // Create the page editor web component and mount it
-  const editor = new PageEditor();
+  // AffineEditorContainer wraps PageEditor with the viewport element
+  // that BlockSuite components require for scroll/position tracking
+  const editor = new AffineEditorContainer();
   editor.doc = doc;
   container.appendChild(editor);
 
