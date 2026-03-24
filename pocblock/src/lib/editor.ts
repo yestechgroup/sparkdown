@@ -1,5 +1,9 @@
-import { effects } from '@blocksuite/presets/effects';
-effects();
+import { effects as stdEffects } from '@blocksuite/block-std/effects';
+import { effects as blocksEffects } from '@blocksuite/blocks/effects';
+import { effects as presetsEffects } from '@blocksuite/presets/effects';
+stdEffects();
+blocksEffects();
+presetsEffects();
 
 import { createEmptyDoc, PageEditor } from '@blocksuite/presets';
 import { Text } from '@blocksuite/store';
