@@ -1,0 +1,24 @@
+# Start all three PoC services
+dev:
+    just sync &
+    just agents &
+    just frontend
+
+frontend:
+    pnpm dev
+
+sync:
+    cd sync-server && npm install && bash start.sh
+
+agents:
+    cd agent-server && cargo run
+
+# Run agent server tests
+test:
+    cd agent-server && cargo test
+
+# Install all dependencies
+install:
+    pnpm install
+    cd sync-server && npm install
+    cd agent-server && cargo build
