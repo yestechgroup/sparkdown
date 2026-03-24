@@ -40,8 +40,10 @@ impl<M: rig::completion::CompletionModel> EntityDetector<M> {
             ))
             .await?;
 
+        tracing::debug!("Entity detector raw response: {:?}", &response[..response.len().min(300)]);
+        let cleaned = super::strip_code_fences(&response);
         let suggestions: Vec<EntitySuggestion> =
-            serde_json::from_str(&response).unwrap_or_default();
+            serde_json::from_str(cleaned).unwrap_or_default();
         Ok(suggestions)
     }
 }

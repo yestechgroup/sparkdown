@@ -37,7 +37,9 @@ impl<M: rig::completion::CompletionModel> Summarizer<M> {
             .prompt(&format!("Summarize:\n\n{text}"))
             .await?;
 
-        let summary: Summary = serde_json::from_str(&response)?;
+        tracing::debug!("Summarizer raw response: {:?}", &response[..response.len().min(300)]);
+        let cleaned = super::strip_code_fences(&response);
+        let summary: Summary = serde_json::from_str(cleaned)?;
         if summary.text.is_empty() {
             return Ok(None);
         }

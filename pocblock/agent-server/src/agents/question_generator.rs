@@ -37,7 +37,9 @@ impl<M: rig::completion::CompletionModel> QuestionGenerator<M> {
             .prompt(&format!("Generate questions:\n\n{text}"))
             .await?;
 
-        let questions: Vec<Question> = serde_json::from_str(&response).unwrap_or_default();
+        tracing::debug!("Question gen raw response: {:?}", &response[..response.len().min(300)]);
+        let cleaned = super::strip_code_fences(&response);
+        let questions: Vec<Question> = serde_json::from_str(cleaned).unwrap_or_default();
         Ok(questions)
     }
 }

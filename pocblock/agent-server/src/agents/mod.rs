@@ -5,6 +5,21 @@ pub mod summarizer;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Strip markdown code fences (```json ... ```) that LLMs often wrap around JSON.
+pub fn strip_code_fences(s: &str) -> &str {
+    let trimmed = s.trim();
+    if let Some(rest) = trimmed.strip_prefix("```") {
+        // Skip optional language tag on first line
+        let rest = rest
+            .find('\n')
+            .map(|i| &rest[i + 1..])
+            .unwrap_or(rest);
+        rest.strip_suffix("```").unwrap_or(rest).trim()
+    } else {
+        trimmed
+    }
+}
+
 /// An entity identified in the document
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct EntitySuggestion {
