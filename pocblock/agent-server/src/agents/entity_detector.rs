@@ -42,8 +42,13 @@ impl<M: rig::completion::CompletionModel> EntityDetector<M> {
 
         tracing::debug!("Entity detector raw response: {:?}", &response[..response.len().min(300)]);
         let cleaned = super::strip_code_fences(&response);
-        let suggestions: Vec<EntitySuggestion> =
-            serde_json::from_str(cleaned).unwrap_or_default();
+        let suggestions: Vec<EntitySuggestion> = match serde_json::from_str(cleaned) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("Entity detector JSON parse failed: {e}, cleaned: {cleaned:?}");
+                vec![]
+            }
+        };
         Ok(suggestions)
     }
 }

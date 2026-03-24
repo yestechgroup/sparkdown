@@ -3,7 +3,18 @@ pub mod question_generator;
 pub mod summarizer;
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Deserialize a value that may be a string or a number into a String.
+/// LLMs often return numeric IDs as JSON numbers instead of strings.
+fn string_or_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::String(s) => Ok(s),
+        serde_json::Value::Number(n) => Ok(n.to_string()),
+        _ => Err(serde::de::Error::custom("expected string or number")),
+    }
+}
 
 /// Strip markdown code fences (```json ... ```) that LLMs often wrap around JSON.
 pub fn strip_code_fences(s: &str) -> &str {
@@ -24,6 +35,7 @@ pub fn strip_code_fences(s: &str) -> &str {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct EntitySuggestion {
     /// The block ID where the entity appears
+    #[serde(deserialize_with = "string_or_number")]
     pub block_id: String,
     /// The exact text span matched
     pub text_span: String,
@@ -50,6 +62,7 @@ pub struct Question {
     /// The question text
     pub text: String,
     /// Which block prompted this question
+    #[serde(deserialize_with = "string_or_number")]
     pub source_block_id: String,
     /// "clarification", "exploration", "challenge"
     pub question_type: String,

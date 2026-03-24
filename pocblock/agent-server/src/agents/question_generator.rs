@@ -39,7 +39,13 @@ impl<M: rig::completion::CompletionModel> QuestionGenerator<M> {
 
         tracing::debug!("Question gen raw response: {:?}", &response[..response.len().min(300)]);
         let cleaned = super::strip_code_fences(&response);
-        let questions: Vec<Question> = serde_json::from_str(cleaned).unwrap_or_default();
+        let questions: Vec<Question> = match serde_json::from_str(cleaned) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("Question gen JSON parse failed: {e}, cleaned: {cleaned:?}");
+                vec![]
+            }
+        };
         Ok(questions)
     }
 }
