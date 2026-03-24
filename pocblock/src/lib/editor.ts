@@ -1,24 +1,22 @@
-import type { Doc } from '@blocksuite/store';
-import { AffineEditorContainer, createEmptyDoc } from '@blocksuite/presets';
-import { effects as presetEffects } from '@blocksuite/presets/effects';
+import '@blocksuite/presets/effects';
 
-// Register all web components (must be called once)
-presetEffects();
+import { AffineEditorContainer, createEmptyDoc } from '@blocksuite/presets';
 
 export interface EditorInstance {
-  doc: Doc;
+  doc: ReturnType<ReturnType<typeof createEmptyDoc>['init']>;
   editor: AffineEditorContainer;
 }
 
 export function createEditor(container: HTMLElement): EditorInstance {
-  // Use the built-in helper which handles Schema, DocCollection, etc.
+  // createEmptyDoc sets up Schema + DocCollection + Doc
   const { doc, init } = createEmptyDoc();
-  init();
+  const loadedDoc = init();
 
-  // Create the editor web component
+  // Create the editor web component and mount it
   const editor = new AffineEditorContainer();
-  editor.doc = doc;
+  editor.doc = loadedDoc;
+  editor.mode = 'page';
   container.appendChild(editor);
 
-  return { doc, editor };
+  return { doc: loadedDoc, editor };
 }
