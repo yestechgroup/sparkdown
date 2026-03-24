@@ -52,6 +52,8 @@ pub async fn handle_doc_update<
         *last = text_hash;
     }
 
+    tracing::debug!("Analysis text ({} chars): {:?}", analysis_text.len(), &analysis_text[..analysis_text.len().min(200)]);
+
     // 2. Run all three agents in parallel
     let (entities, summary, questions) = tokio::join!(
         state.entity_detector.analyze(&doc_view),
@@ -72,6 +74,16 @@ pub async fn handle_doc_update<
     let mut notes_written = 0;
     {
         let doc = state.doc.lock().await;
+
+        if let Err(ref e) = entities {
+            tracing::error!("Entity detector failed: {e}");
+        }
+        if let Err(ref e) = summary {
+            tracing::error!("Summarizer failed: {e}");
+        }
+        if let Err(ref e) = questions {
+            tracing::error!("Question generator failed: {e}");
+        }
 
         if let Ok(entities) = entities {
             for entity in entities {
