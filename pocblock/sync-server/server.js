@@ -105,12 +105,12 @@ function handleConnection(ws, roomName) {
             // Update: incremental update, apply and broadcast
             const update = decoding.readVarUint8Array(decoder);
             Y.applyUpdate(room.doc, update);
-          }
-
-          // Broadcast the raw message to other clients
-          for (const conn of room.conns) {
-            if (conn !== ws && conn.readyState === 1) {
-              conn.send(message);
+            // Only broadcast incremental updates to other clients
+            // (SyncStep1/2 are handshake messages between client and server)
+            for (const conn of room.conns) {
+              if (conn !== ws && conn.readyState === 1) {
+                conn.send(message);
+              }
             }
           }
           break;
