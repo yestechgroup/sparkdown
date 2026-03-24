@@ -1,6 +1,6 @@
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub provider: String,
+    pub anthropic_api_key: String,
     pub model: String,
     pub agent_port: u16,
     pub sync_url: String,
@@ -9,9 +9,16 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_env() -> Self {
-        Self {
-            provider: std::env::var("AGENT_PROVIDER").unwrap_or("anthropic".into()),
+    pub fn from_env() -> anyhow::Result<Self> {
+        let anthropic_api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
+            anyhow::anyhow!(
+                "ANTHROPIC_API_KEY environment variable is required.\n\
+                 Set it with: export ANTHROPIC_API_KEY=sk-ant-..."
+            )
+        })?;
+
+        Ok(Self {
+            anthropic_api_key,
             model: std::env::var("AGENT_MODEL")
                 .unwrap_or("claude-sonnet-4-5-20250514".into()),
             agent_port: std::env::var("AGENT_PORT")
@@ -28,6 +35,6 @@ impl Config {
                 .ok()
                 .and_then(|c| c.parse().ok())
                 .unwrap_or(0.6),
-        }
+        })
     }
 }

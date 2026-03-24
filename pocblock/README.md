@@ -42,12 +42,20 @@ Proof-of-concept: AI agents collaboratively editing a BlockSuite document in rea
 
 All commands are run from the `pocblock/` directory. You need **three terminals**.
 
-### 1. Set up environment
+### 1. Set your Anthropic API key
+
+The agent server uses the Anthropic API (Claude) for all three AI agents. You must provide your API key via the `ANTHROPIC_API_KEY` environment variable.
 
 ```bash
+# Option A: export it in your shell
+export ANTHROPIC_API_KEY=sk-ant-your-key-here
+
+# Option B: use a .env file
 cp .env.example .env
-# Edit .env and set your ANTHROPIC_API_KEY
+# Edit .env and set ANTHROPIC_API_KEY=sk-ant-your-key-here
 ```
+
+The server will exit with an error if this variable is not set.
 
 ### 2. Install dependencies
 
@@ -77,10 +85,14 @@ You should see: `Starting y-websocket on :4444 (callback → http://localhost:30
 
 ```bash
 cd pocblock/agent-server
-ANTHROPIC_API_KEY=sk-ant-your-key-here cargo run
+cargo run
+# Or, if you didn't export the key globally:
+# ANTHROPIC_API_KEY=sk-ant-your-key-here cargo run
 ```
 
 You should see: `Agent server listening on 0.0.0.0:3001`
+
+If you see `ANTHROPIC_API_KEY environment variable is required`, set the key and try again.
 
 **Terminal 3 — Frontend dev server (port 5173):**
 

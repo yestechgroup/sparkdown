@@ -19,17 +19,11 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter("sparkdown_agent_poc=debug,info")
         .init();
 
-    let config = config::Config::from_env();
-    tracing::info!(
-        "Config: provider={}, model={}",
-        config.provider,
-        config.model
-    );
+    let config = config::Config::from_env()?;
+    tracing::info!("Config: model={}", config.model);
 
-    // Initialize LLM provider
-    let client = anthropic::Client::new(
-        &std::env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
-    )?;
+    // Initialize Anthropic LLM provider using ANTHROPIC_API_KEY env var
+    let client = anthropic::Client::new(&config.anthropic_api_key)?;
     let model = client.completion_model(&config.model);
 
     // Create shared Yrs doc
