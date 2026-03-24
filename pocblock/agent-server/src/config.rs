@@ -1,6 +1,6 @@
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub anthropic_api_key: String,
+    pub llm_api_key: String,
     pub model: String,
     pub agent_port: u16,
     pub sync_url: String,
@@ -10,17 +10,20 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
-        let anthropic_api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-            anyhow::anyhow!(
-                "ANTHROPIC_API_KEY environment variable is required.\n\
-                 Set it with: export ANTHROPIC_API_KEY=sk-ant-..."
-            )
-        })?;
+        // Support both DEEPSEEK_API_KEY and ANTHROPIC_API_KEY for backwards compat
+        let llm_api_key = std::env::var("DEEPSEEK_API_KEY")
+            .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "DEEPSEEK_API_KEY environment variable is required.\n\
+                     Set it with: export DEEPSEEK_API_KEY=sk-..."
+                )
+            })?;
 
         Ok(Self {
-            anthropic_api_key,
+            llm_api_key,
             model: std::env::var("AGENT_MODEL")
-                .unwrap_or("claude-sonnet-4-5-20250514".into()),
+                .unwrap_or("deepseek-chat".into()),
             agent_port: std::env::var("AGENT_PORT")
                 .ok()
                 .and_then(|p| p.parse().ok())

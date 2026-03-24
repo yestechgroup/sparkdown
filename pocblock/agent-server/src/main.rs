@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use axum::routing::{get, post};
 use axum::Router;
 use rig::client::CompletionClient;
-use rig::providers::anthropic;
+use rig::providers::deepseek;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -22,8 +22,8 @@ async fn main() -> anyhow::Result<()> {
     let config = config::Config::from_env()?;
     tracing::info!("Config: model={}", config.model);
 
-    // Initialize Anthropic LLM provider using ANTHROPIC_API_KEY env var
-    let client = anthropic::Client::new(&config.anthropic_api_key)?;
+    // Initialize DeepSeek LLM provider
+    let client = deepseek::Client::new(&config.llm_api_key)?;
     let model = client.completion_model(&config.model);
 
     // Create shared Yrs doc
