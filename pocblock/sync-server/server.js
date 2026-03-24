@@ -56,21 +56,26 @@ function handleConnection(ws, roomName) {
     ws.send(encoding.toUint8Array(encoder));
   }
 
-  // Send current awareness state
+  // Send current awareness state (only if there are states)
   {
-    const awarenessStates = awarenessProtocol.encodeAwarenessUpdate(
-      room.awareness,
-      Array.from(room.awareness.getStates().keys())
-    );
-    const encoder = encoding.createEncoder();
-    encoding.writeVarUint(encoder, MSG_AWARENESS);
-    encoding.writeVarUint8Array(encoder, awarenessStates);
-    ws.send(encoding.toUint8Array(encoder));
+    const clients = Array.from(room.awareness.getStates().keys());
+    if (clients.length > 0) {
+      const awarenessStates = awarenessProtocol.encodeAwarenessUpdate(
+        room.awareness,
+        clients
+      );
+      const encoder = encoding.createEncoder();
+      encoding.writeVarUint(encoder, MSG_AWARENESS);
+      encoding.writeVarUint8Array(encoder, awarenessStates);
+      ws.send(encoding.toUint8Array(encoder));
+    }
   }
 
   ws.on('message', (data) => {
     try {
       const message = new Uint8Array(data);
+      const hexPreview = Array.from(message.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+      console.log(`Recv [${message.length} bytes]: ${hexPreview}${message.length > 20 ? '...' : ''}`);
       const decoder = decoding.createDecoder(message);
       const msgType = decoding.readVarUint(decoder);
 
